@@ -28,4 +28,4 @@ echo =====================================================================
 echo  [OK] Seluruh server AllTools-CyberSec telah dihentikan.
 echo =====================================================================
 echo.
-timeout /t 3
+ping 127.0.0.1 -n 3 >nul 2>&1

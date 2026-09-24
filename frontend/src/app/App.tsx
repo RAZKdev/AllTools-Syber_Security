@@ -13,7 +13,7 @@ export const App: React.FC = () => {
     // Heartbeat mechanism: periodically informs backend that the browser is open.
     // If the browser tab/window is closed, backend auto-terminates after a 3s window.
     const sendHeartbeat = () => {
-      fetch('http://localhost:8000/api/heartbeat', { method: 'POST' }).catch(() => {});
+      fetch('/api/heartbeat', { method: 'POST' }).catch(() => {});
     };
 
     sendHeartbeat();
@@ -21,9 +21,9 @@ export const App: React.FC = () => {
 
     const handleBeforeUnload = () => {
       if (navigator.sendBeacon) {
-        navigator.sendBeacon('http://localhost:8000/api/shutdown');
+        navigator.sendBeacon('/api/shutdown');
       } else {
-        fetch('http://localhost:8000/api/shutdown', { method: 'POST', keepalive: true }).catch(() => {});
+        fetch('/api/shutdown', { method: 'POST', keepalive: true }).catch(() => {});
       }
     };
 
