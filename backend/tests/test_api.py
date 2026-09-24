@@ -207,3 +207,15 @@ def test_engagement_and_scope_workflow():
     assert rep_html_res.status_code == 200
     assert "<!DOCTYPE html>" in rep_html_res.text
     assert "Security Assessment Report" in rep_html_res.text
+
+
+def test_heartbeat_and_shutdown_endpoints():
+    # Heartbeat
+    hb_res = client.get("/api/heartbeat")
+    assert hb_res.status_code == 200
+    assert hb_res.json()["status"] == "alive"
+
+    # Shutdown endpoint (when auto-shutdown is not enabled in test env)
+    sd_res = client.post("/api/shutdown")
+    assert sd_res.status_code == 200
+    assert sd_res.json()["status"] == "ignored"

@@ -116,10 +116,11 @@ alltools-cybersec/
 Cukup klik ganda (double-click) file **`start.bat`** di direktori utama:
 - Otomatis memvalidasi dependensi Python dan Node.js
 - Menyiapkan virtual environment dan menginstal paket yang diperlukan jika belum ada
-- Menjalankan Backend (FastAPI di port 8000) dan Frontend (Vite di port 5173) secara bersamaan
-- Membuka browser ke `http://localhost:5173` secara otomatis
+- Menjalankan Backend (port 8000) dan Frontend (port 5173) secara terkoordinasi
+- Langsung membuka AllTools-CyberSec di browser default (`http://localhost:5173`)
+- **Cara Mematikan Server**: Cukup **tutup tab atau jendela web browser Anda**. Seluruh server dan konsol peluncur akan otomatis mati dan tertutup sendiri secara bersih!
 
-Untuk mematikan seluruh server, cukup jalankan **`stop.bat`** atau tutup jendela konsol Backend dan Frontend.
+*(Opsional: File **`stop.bat`** tetap tersedia jika sewaktu-waktu ingin mematikan port secara manual).*
 
 ---
 

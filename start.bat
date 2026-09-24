@@ -1,6 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
-title AllTools-CyberSec Launcher
+title AllTools-CyberSec Workbench
 cd /d "%~dp0"
 
 echo =====================================================================
@@ -34,7 +34,7 @@ set "VENV_DIR=%~dp0backend\.venv"
 set "PYTHON_EXE=%VENV_DIR%\Scripts\python.exe"
 
 if not exist "%PYTHON_EXE%" (
-    echo [*] backend\.venv belum ditemukan. Membuat virtual environment...
+    echo [*] backend\.venv belum ditemukan. Membuat virtual environment baru...
     python -m venv "%VENV_DIR%"
     if %errorlevel% neq 0 (
         echo [ERROR] Gagal membuat virtual environment di %VENV_DIR%!
@@ -54,32 +54,7 @@ if not exist "%~dp0frontend\node_modules\" (
     cd /d "%~dp0"
 )
 
-echo.
-echo [*] Menyalakan Backend Service (FastAPI + Scope Guard)...
-start "AllTools-CyberSec Backend (Port 8000)" "%~dp0scripts\run-backend.bat"
+:: 5. Jalankan Workbench Launcher Supervisor
+"%PYTHON_EXE%" "%~dp0scripts\launcher.py"
 
-echo [*] Menyalakan Frontend Service (React + Vite)...
-start "AllTools-CyberSec Frontend (Port 5173)" "%~dp0scripts\run-frontend.bat"
-
-echo.
-echo [*] Menunggu inisialisasi server (3 detik)...
-timeout /t 3 /nobreak >nul
-
-echo [*] Membuka AllTools-CyberSec di browser default...
-start http://localhost:5173
-
-echo.
-echo =====================================================================
-echo               ALLTOOLS-CYBERSEC WORKBENCH AKTIF!
-echo =====================================================================
-echo  - Frontend Web UI : http://localhost:5173
-echo  - Backend REST API: http://localhost:8000
-echo  - Swagger API Docs: http://localhost:8000/docs
-echo  - Scope Guard     : ACTIVE (Default-Deny Enforced)
-echo =====================================================================
-echo.
-echo Server berjalan di latar belakang (jendela Backend & Frontend).
-echo Untuk menghentikan semua server, jalankan stop.bat atau tutup jendela terkait.
-echo.
-echo Tekan tombol apa saja untuk menutup jendela peluncur ini...
-pause >nul
+exit /b 0
