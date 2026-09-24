@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alltools-cybersec.local/contracts/ioc-record.schema.json",
+  "title": "IOCRecord",
+  "type": "object",
+  "required": ["id", "incidentId", "type", "value"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "incidentId": { "type": "string", "minLength": 1 },
+    "type": { "type": "string", "enum": ["ip", "domain", "hash", "url", "artifact"] },
+    "value": { "type": "string", "minLength": 1 },
+    "notes": { "type": "string" }
+  },
+  "additionalProperties": false
+}

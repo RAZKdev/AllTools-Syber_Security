@@ -1,0 +1,7 @@
+{
+  "A": ["192.168.1.10"],
+  "TXT": [
+    "google-site-verification=abc123xyz",
+    "some-other-domain-verification"
+  ]
+}

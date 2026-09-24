@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alltools-cybersec.local/contracts/scope-item.schema.json",
+  "title": "ScopeItem",
+  "type": "object",
+  "required": ["id", "engagementId", "type", "value", "inScope"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "engagementId": { "type": "string", "minLength": 1 },
+    "type": { "type": "string", "enum": ["domain", "subdomain", "ip", "cidr", "hostname", "url", "application", "repository", "log_source", "file_set"] },
+    "value": { "type": "string", "minLength": 1 },
+    "environment": { "type": "string", "enum": ["lab", "development", "staging", "production", "unknown"] },
+    "inScope": { "type": "boolean" },
+    "notes": { "type": "string" },
+    "expiresAt": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

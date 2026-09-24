@@ -1,0 +1,12 @@
+{
+  "id": "FND-0001",
+  "assessmentId": "ASM-0001",
+  "assetId": "AST-0001",
+  "ruleId": "SEC-HTTP-001",
+  "title": "Example finding",
+  "description": "Example contract payload for local development only.",
+  "status": "NEEDS_REVIEW",
+  "severity": "medium",
+  "confidence": "high",
+  "createdAt": "2026-09-22T00:00:00Z"
+}

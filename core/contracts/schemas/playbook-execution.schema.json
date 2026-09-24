@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alltools-cybersec.local/contracts/playbook-execution.schema.json",
+  "title": "PlaybookExecution",
+  "type": "object",
+  "required": ["id", "playbookId", "status", "startedAt"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "playbookId": { "type": "string", "minLength": 1 },
+    "assessmentId": { "type": "string" },
+    "incidentId": { "type": "string" },
+    "status": { "type": "string", "enum": ["queued", "running", "completed", "blocked", "failed", "cancelled"] },
+    "startedAt": { "type": "string", "format": "date-time" },
+    "completedAt": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

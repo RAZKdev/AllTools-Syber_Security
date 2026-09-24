@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alltools-cybersec.local/contracts/check-execution.schema.json",
+  "title": "CheckExecution",
+  "type": "object",
+  "required": ["id", "assessmentId", "ruleId", "target", "scopeDecision", "status", "executedAt"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "assessmentId": { "type": "string", "minLength": 1 },
+    "ruleId": { "type": "string", "minLength": 1 },
+    "target": { "type": "string", "minLength": 1 },
+    "scopeDecision": { "type": "string", "enum": ["ALLOW", "BLOCK"] },
+    "status": { "type": "string", "enum": ["PASS", "FAIL", "WARN", "NOT_TESTED", "ERROR", "BLOCKED_OUT_OF_SCOPE", "INSUFFICIENT_DATA"] },
+    "ruleVersion": { "type": "string" },
+    "durationMs": { "type": "integer", "minimum": 0 },
+    "errorCode": { "type": "string" },
+    "errorMessage": { "type": "string" },
+    "executedAt": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

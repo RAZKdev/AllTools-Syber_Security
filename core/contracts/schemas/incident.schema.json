@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alltools-cybersec.local/contracts/incident.schema.json",
+  "title": "Incident",
+  "type": "object",
+  "required": ["id", "engagementId", "title", "status", "createdAt"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "engagementId": { "type": "string", "minLength": 1 },
+    "title": { "type": "string", "minLength": 1 },
+    "severity": { "type": "string", "enum": ["informational", "low", "medium", "high", "critical"] },
+    "status": { "type": "string", "enum": ["detected", "investigating", "contained", "remediated", "recovered", "closed"] },
+    "summary": { "type": "string" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

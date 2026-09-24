@@ -1,0 +1,12 @@
+{
+  "subject": [[["commonName", "app.lab.local"]]],
+  "issuer": [[["commonName", "Lab Internal CA"]]],
+  "commonName": "app.lab.local",
+  "subjectAltName": [
+    ["DNS", "app.lab.local"]
+  ],
+  "notBefore": "Jan  1 00:00:00 2020 GMT",
+  "notAfter": "Jan  1 00:00:00 2023 GMT",
+  "version": 3,
+  "serialNumber": "1122334455"
+}

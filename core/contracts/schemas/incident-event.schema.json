@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alltools-cybersec.local/contracts/incident-event.schema.json",
+  "title": "IncidentEvent",
+  "type": "object",
+  "required": ["id", "incidentId", "eventType", "occurredAt", "description"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "incidentId": { "type": "string", "minLength": 1 },
+    "eventType": { "type": "string", "minLength": 1 },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "description": { "type": "string", "minLength": 1 },
+    "evidenceIds": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}

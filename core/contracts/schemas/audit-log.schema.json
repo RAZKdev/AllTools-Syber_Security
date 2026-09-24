@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alltools-cybersec.local/contracts/audit-log.schema.json",
+  "title": "AuditLog",
+  "type": "object",
+  "required": ["id", "action", "occurredAt"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "actorId": { "type": "string" },
+    "action": { "type": "string", "minLength": 1 },
+    "objectType": { "type": "string" },
+    "objectId": { "type": "string" },
+    "before": { "type": "object", "additionalProperties": true },
+    "after": { "type": "object", "additionalProperties": true },
+    "occurredAt": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

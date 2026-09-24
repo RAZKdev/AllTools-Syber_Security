@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alltools-cybersec.local/contracts/asset.schema.json",
+  "title": "Asset",
+  "type": "object",
+  "required": ["id", "engagementId", "type", "name", "criticality", "status"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "engagementId": { "type": "string", "minLength": 1 },
+    "type": { "type": "string", "enum": ["domain", "subdomain", "ip", "hostname", "application", "api", "repository", "server", "endpoint", "cloud_resource"] },
+    "name": { "type": "string", "minLength": 1 },
+    "address": { "type": "string" },
+    "owner": { "type": "string" },
+    "environment": { "type": "string", "enum": ["lab", "development", "staging", "production", "unknown"] },
+    "criticality": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+    "exposure": { "type": "string", "enum": ["internal", "restricted", "public", "unknown"] },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "status": { "type": "string", "enum": ["active", "inactive", "unknown"] }
+  },
+  "additionalProperties": false
+}

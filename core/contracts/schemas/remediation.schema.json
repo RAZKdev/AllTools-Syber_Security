@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alltools-cybersec.local/contracts/remediation.schema.json",
+  "title": "Remediation",
+  "type": "object",
+  "required": ["id", "findingId", "status", "createdAt"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "findingId": { "type": "string", "minLength": 1 },
+    "recommendation": { "type": "string" },
+    "owner": { "type": "string" },
+    "dueAt": { "type": "string", "format": "date-time" },
+    "status": { "type": "string", "enum": ["open", "in_progress", "completed", "blocked", "cancelled"] },
+    "notes": { "type": "string" },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

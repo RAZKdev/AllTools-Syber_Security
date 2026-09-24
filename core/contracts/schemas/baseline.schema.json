@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alltools-cybersec.local/contracts/baseline.schema.json",
+  "title": "Baseline",
+  "type": "object",
+  "required": ["id", "assessmentId", "createdAt"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "assessmentId": { "type": "string", "minLength": 1 },
+    "assetIds": { "type": "array", "items": { "type": "string" } },
+    "findingIds": { "type": "array", "items": { "type": "string" } },
+    "snapshotPath": { "type": "string" },
+    "createdAt": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

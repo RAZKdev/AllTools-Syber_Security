@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alltools-cybersec.local/contracts/risk-assessment.schema.json",
+  "title": "RiskAssessment",
+  "type": "object",
+  "required": ["id", "findingId", "priority"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "findingId": { "type": "string", "minLength": 1 },
+    "priority": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+    "assetCriticality": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
+    "exposure": { "type": "string", "enum": ["internal", "restricted", "public", "unknown"] },
+    "businessContext": { "type": "string" },
+    "rationale": { "type": "string" },
+    "assessedAt": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

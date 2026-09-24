@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alltools-cybersec.local/contracts/common-defs.schema.json",
+  "title": "AllTools-CyberSec Common Definitions",
+  "$defs": {
+    "Id": { "type": "string", "minLength": 1 },
+    "Timestamp": { "type": "string", "format": "date-time" },
+    "Severity": { "type": "string", "enum": ["informational", "low", "medium", "high", "critical"] },
+    "Confidence": { "type": "string", "enum": ["low", "medium", "high"] },
+    "ExecutionStatus": { "type": "string", "enum": ["PASS", "FAIL", "WARN", "NOT_TESTED", "ERROR", "BLOCKED_OUT_OF_SCOPE", "INSUFFICIENT_DATA"] },
+    "FindingStatus": { "type": "string", "enum": ["DETECTED", "NEEDS_REVIEW", "CONFIRMED", "FALSE_POSITIVE", "ACCEPTED_RISK", "MITIGATED", "REMEDIATION", "RETEST_REQUIRED", "RESOLVED", "REGRESSION"] },
+    "Environment": { "type": "string", "enum": ["lab", "development", "staging", "production", "unknown"] },
+    "Exposure": { "type": "string", "enum": ["internal", "restricted", "public", "unknown"] }
+  }
+}

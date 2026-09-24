@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alltools-cybersec.local/contracts/assessment.schema.json",
+  "title": "Assessment",
+  "type": "object",
+  "required": ["id", "engagementId", "name", "status", "createdAt"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "engagementId": { "type": "string", "minLength": 1 },
+    "name": { "type": "string", "minLength": 1 },
+    "type": { "type": "string", "enum": ["web", "infrastructure", "code", "dependency", "configuration", "log", "incident", "general"] },
+    "status": { "type": "string", "enum": ["draft", "queued", "running", "completed", "failed", "cancelled"] },
+    "startedAt": { "type": "string", "format": "date-time" },
+    "completedAt": { "type": "string", "format": "date-time" },
+    "createdAt": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

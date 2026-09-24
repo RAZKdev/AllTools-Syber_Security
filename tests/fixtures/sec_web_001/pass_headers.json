@@ -1,0 +1,9 @@
+{
+  "content-type": "text/html; charset=UTF-8",
+  "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+  "content-security-policy": "default-src 'self'; script-src 'self'",
+  "x-content-type-options": "nosniff",
+  "x-frame-options": "DENY",
+  "referrer-policy": "strict-origin-when-cross-origin",
+  "server": "nginx"
+}

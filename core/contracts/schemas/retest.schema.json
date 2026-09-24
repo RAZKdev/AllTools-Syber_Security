@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alltools-cybersec.local/contracts/retest.schema.json",
+  "title": "Retest",
+  "type": "object",
+  "required": ["id", "findingId", "result", "testedAt"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "findingId": { "type": "string", "minLength": 1 },
+    "assessmentId": { "type": "string" },
+    "result": { "type": "string", "enum": ["PASS", "FAIL", "PARTIALLY_RESOLVED", "REGRESSION", "ERROR", "NOT_TESTED"] },
+    "summary": { "type": "string" },
+    "evidenceIds": { "type": "array", "items": { "type": "string" } },
+    "testedAt": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

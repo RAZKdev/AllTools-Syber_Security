@@ -1,0 +1,8 @@
+{
+  "content-type": "text/html; charset=UTF-8",
+  "strict-transport-security": "max-age=31536000",
+  "content-security-policy": "default-src 'self' 'unsafe-inline'",
+  "x-content-type-options": "nosniff",
+  "x-frame-options": "SAMEORIGIN",
+  "server": "nginx/1.18.0"
+}

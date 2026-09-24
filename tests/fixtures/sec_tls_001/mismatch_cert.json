@@ -1,0 +1,12 @@
+{
+  "subject": [[["commonName", "internal-portal.corp"]]],
+  "issuer": [[["commonName", "Lab Internal CA"]]],
+  "commonName": "internal-portal.corp",
+  "subjectAltName": [
+    ["DNS", "internal-portal.corp"]
+  ],
+  "notBefore": "Jan  1 00:00:00 2024 GMT",
+  "notAfter": "Jan  1 00:00:00 2030 GMT",
+  "version": 3,
+  "serialNumber": "5544332211"
+}

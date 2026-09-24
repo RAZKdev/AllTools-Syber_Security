@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alltools-cybersec.local/contracts/observation.schema.json",
+  "title": "Observation",
+  "type": "object",
+  "required": ["id", "assessmentId", "assetId", "ruleId", "summary", "observedAt"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "assessmentId": { "type": "string", "minLength": 1 },
+    "assetId": { "type": "string", "minLength": 1 },
+    "ruleId": { "type": "string", "minLength": 1 },
+    "summary": { "type": "string", "minLength": 1 },
+    "details": { "type": "object", "additionalProperties": true },
+    "observedAt": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alltools-cybersec.local/contracts/diff-result.schema.json",
+  "title": "DiffResult",
+  "type": "object",
+  "required": ["baselineId", "assessmentId", "generatedAt"],
+  "properties": {
+    "baselineId": { "type": "string", "minLength": 1 },
+    "assessmentId": { "type": "string", "minLength": 1 },
+    "newFindingIds": { "type": "array", "items": { "type": "string" } },
+    "resolvedFindingIds": { "type": "array", "items": { "type": "string" } },
+    "unchangedFindingIds": { "type": "array", "items": { "type": "string" } },
+    "regressedFindingIds": { "type": "array", "items": { "type": "string" } },
+    "generatedAt": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

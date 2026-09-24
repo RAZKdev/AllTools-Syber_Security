@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alltools-cybersec.local/contracts/reference.schema.json",
+  "title": "Reference",
+  "type": "object",
+  "required": ["id", "kind", "identifier", "title"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "kind": { "type": "string", "enum": ["CVE", "CWE", "OWASP_WSTG", "CIS", "NIST", "VENDOR", "OTHER"] },
+    "identifier": { "type": "string", "minLength": 1 },
+    "title": { "type": "string", "minLength": 1 },
+    "url": { "type": "string", "format": "uri" },
+    "notes": { "type": "string" }
+  },
+  "additionalProperties": false
+}

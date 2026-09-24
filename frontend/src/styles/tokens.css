@@ -1,0 +1,69 @@
+:root {
+  /* Color Palette - Dark First Professional Security Workbench */
+  --bg-canvas: #090d16;
+  --bg-surface: #0f172a;
+  --bg-surface-elevated: #1e293b;
+  --bg-surface-hover: #273549;
+
+  --border-subtle: #1e293b;
+  --border-default: #334155;
+  --border-strong: #475569;
+  --border-focus: #38bdf8;
+
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+
+  --accent: #38bdf8;
+  --accent-muted: rgba(56, 189, 248, 0.12);
+
+  /* Status Tokens */
+  --status-pass-text: #34d399;
+  --status-pass-bg: rgba(16, 185, 129, 0.12);
+  --status-pass-border: rgba(16, 185, 129, 0.3);
+
+  --status-fail-text: #f87171;
+  --status-fail-bg: rgba(239, 68, 68, 0.14);
+  --status-fail-border: rgba(239, 68, 68, 0.35);
+
+  --status-warn-text: #fbbf24;
+  --status-warn-bg: rgba(245, 158, 11, 0.14);
+  --status-warn-border: rgba(245, 158, 11, 0.35);
+
+  --status-error-text: #fb7185;
+  --status-error-bg: rgba(244, 63, 94, 0.15);
+  --status-error-border: rgba(244, 63, 94, 0.4);
+
+  --status-blocked-text: #f43f5e;
+  --status-blocked-bg: rgba(225, 29, 72, 0.16);
+  --status-blocked-border: rgba(225, 29, 72, 0.45);
+
+  --status-neutral-text: #94a3b8;
+  --status-neutral-bg: rgba(148, 163, 184, 0.12);
+  --status-neutral-border: rgba(148, 163, 184, 0.25);
+
+  /* Severity Tokens */
+  --sev-critical-text: #f87171;
+  --sev-critical-bg: rgba(239, 68, 68, 0.15);
+  --sev-critical-border: rgba(239, 68, 68, 0.4);
+
+  --sev-high-text: #fb923c;
+  --sev-high-bg: rgba(249, 115, 22, 0.15);
+  --sev-high-border: rgba(249, 115, 22, 0.4);
+
+  --sev-medium-text: #fbbf24;
+  --sev-medium-bg: rgba(245, 158, 11, 0.15);
+  --sev-medium-border: rgba(245, 158, 11, 0.4);
+
+  --sev-low-text: #60a5fa;
+  --sev-low-bg: rgba(59, 130, 246, 0.15);
+  --sev-low-border: rgba(59, 130, 246, 0.4);
+
+  --sev-info-text: #94a3b8;
+  --sev-info-bg: rgba(148, 163, 184, 0.15);
+  --sev-info-border: rgba(148, 163, 184, 0.3);
+
+  /* Fonts */
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+}

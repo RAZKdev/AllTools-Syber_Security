@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://alltools-cybersec.local/contracts/evidence.schema.json",
+  "title": "Evidence",
+  "type": "object",
+  "required": ["id", "assessmentId", "type", "capturedAt", "sha256"],
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "assessmentId": { "type": "string", "minLength": 1 },
+    "findingId": { "type": "string" },
+    "type": { "type": "string", "enum": ["http_response", "screenshot", "log_excerpt", "json_result", "file", "configuration_snapshot", "hash", "other"] },
+    "source": { "type": "string" },
+    "artifactPath": { "type": "string" },
+    "capturedAt": { "type": "string", "format": "date-time" },
+    "sha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" },
+    "redacted": { "type": "boolean" },
+    "notes": { "type": "string" }
+  },
+  "additionalProperties": false
+}
