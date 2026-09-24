@@ -125,19 +125,45 @@ export const ExecutionsPage: React.FC = () => {
                 fontFamily: 'var(--font-mono)',
               }}
             >
-              <option value="SEC-TLS-001">SEC-TLS-001: TLS Certificate & Protocol Check</option>
-              <option value="SEC-WEB-001">SEC-WEB-001: HTTP Security Headers Validation</option>
-              <option value="SEC-DNS-001">SEC-DNS-001: DNS SPF/DMARC Anti-Spoofing Check</option>
+              <optgroup label="Web Application Security">
+                <option value="SEC-WEB-001">SEC-WEB-001: HTTP Security Headers Validation</option>
+                <option value="SEC-WEB-002">SEC-WEB-002: Cookie Defensive Flags (Secure, HttpOnly, SameSite)</option>
+                <option value="SEC-WEB-003">SEC-WEB-003: Server Banner & Tech Stack Disclosure</option>
+                <option value="SEC-WEB-004">SEC-WEB-004: CORS Policy & Access-Control Misconfiguration</option>
+                <option value="SEC-WEB-005">SEC-WEB-005: Sensitive Files & RFC 9116 security.txt</option>
+              </optgroup>
+              <optgroup label="Transport & Network Security">
+                <option value="SEC-TLS-001">SEC-TLS-001: TLS Certificate & Cipher Version Check</option>
+                <option value="SEC-NET-001">SEC-NET-001: Authorized Port & Critical Service Exposure Probe</option>
+              </optgroup>
+              <optgroup label="DNS & Domain Security">
+                <option value="SEC-DNS-001">SEC-DNS-001: DNS Email Anti-Spoofing (SPF/DMARC)</option>
+                <option value="SEC-DNS-002">SEC-DNS-002: DNS CAA (Certificate Authority Auth) Record</option>
+              </optgroup>
+              <optgroup label="Cryptography & Identity">
+                <option value="SEC-CRYPTO-001">SEC-CRYPTO-001: Cryptographic Hash Algorithm Strength</option>
+                <option value="SEC-AUTH-001">SEC-AUTH-001: Password Policy & Entropy Compliance Auditor</option>
+              </optgroup>
             </select>
           </div>
 
           <div>
-            <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Target</label>
+            <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+              Target / Test Sample
+            </label>
             <input
               type="text"
               value={target}
               onChange={(e) => setTarget(e.target.value)}
-              placeholder="e.g. app.lab.local, 192.168.1.50"
+              placeholder={
+                ruleId === 'SEC-CRYPTO-001'
+                  ? 'e.g. 5d41402abc4b2a76b9719d911017c592 or SHA256 string'
+                  : ruleId === 'SEC-AUTH-001'
+                  ? 'e.g. PasswordToAudit123!'
+                  : ruleId === 'SEC-NET-001'
+                  ? 'e.g. 192.168.1.50 or app.lab.local'
+                  : 'e.g. app.lab.local, lab.local'
+              }
               style={{
                 width: '100%',
                 padding: '10px 14px',
