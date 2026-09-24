@@ -2,10 +2,12 @@ import os
 import sys
 import time
 import socket
+import signal
+import atexit
 import subprocess
 import urllib.request
 
-# Ensure real-time unbuffered output in terminal
+# Real-time unbuffered terminal output
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(line_buffering=True)
 
@@ -16,6 +18,9 @@ FRONTEND_DIR = os.path.join(ROOT_DIR, "frontend")
 VENV_PYTHON = os.path.join(BACKEND_DIR, ".venv", "Scripts", "python.exe")
 PYTHON_EXE = VENV_PYTHON if os.path.isfile(VENV_PYTHON) else sys.executable
 NPM_CMD = "npm.cmd" if os.name == "nt" else "npm"
+
+backend_proc = None
+frontend_proc = None
 
 
 def kill_port(port: int):
@@ -39,6 +44,28 @@ def kill_port(port: int):
         pass
 
 
+def cleanup():
+    """Stop all child processes and free ports."""
+    global backend_proc, frontend_proc
+    if backend_proc is not None:
+        try:
+            backend_proc.terminate()
+            backend_proc.kill()
+        except Exception:
+            pass
+    if frontend_proc is not None:
+        try:
+            frontend_proc.terminate()
+            frontend_proc.kill()
+        except Exception:
+            pass
+    kill_port(8000)
+    kill_port(5173)
+
+
+atexit.register(cleanup)
+
+
 def is_port_open(port: int, host: str = "127.0.0.1") -> bool:
     """Check if a TCP port is open."""
     for h in (host, "localhost"):
@@ -50,12 +77,12 @@ def is_port_open(port: int, host: str = "127.0.0.1") -> bool:
     return False
 
 
-def wait_for_service(url: str, timeout: float = 25.0) -> bool:
+def wait_for_service(url: str, timeout: float = 20.0) -> bool:
     """Poll an HTTP URL until it returns 200."""
     start = time.time()
     while time.time() - start < timeout:
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Workbench-Supervisor"})
+            req = urllib.request.Request(url, headers={"User-Agent": "Workbench-Runner"})
             with urllib.request.urlopen(req, timeout=1.0) as resp:
                 if resp.status in (200, 304):
                     return True
@@ -65,18 +92,20 @@ def wait_for_service(url: str, timeout: float = 25.0) -> bool:
     return False
 
 
-def print_log_tail(file_path: str, lines: int = 15):
-    """Print the last few lines of a log file if an error occurred."""
-    if os.path.isfile(file_path):
-        try:
-            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-                content = f.readlines()
-                print("".join(content[-lines:]))
-        except Exception:
-            pass
+def handle_signal(sig, frame):
+    cleanup()
+    sys.exit(0)
+
+
+signal.signal(signal.SIGINT, handle_signal)
+signal.signal(signal.SIGTERM, handle_signal)
+if hasattr(signal, "SIGBREAK"):
+    signal.signal(signal.SIGBREAK, handle_signal)
 
 
 def main():
+    global backend_proc, frontend_proc
+
     print("=====================================================================")
     print("      ALLTOOLS-CYBERSEC DEFENSIVE SECURITY WORKBENCH")
     print("=====================================================================")
@@ -88,7 +117,6 @@ def main():
 
     # Configure environment
     env = os.environ.copy()
-    env["ALLTOOLS_AUTO_SHUTDOWN"] = "1"
     existing_pythonpath = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = f"{ROOT_DIR};{BACKEND_DIR}" + (f";{existing_pythonpath}" if existing_pythonpath else "")
 
@@ -129,14 +157,12 @@ def main():
 
     print("[*] Menunggu layanan Backend siap...")
     if not wait_for_service("http://127.0.0.1:8000/health", timeout=20.0):
-        print("\n[ERROR] Server Backend gagal dimulai dalam batas waktu!")
-        print("Log Backend terakhir:")
+        print("\n[ERROR] Server Backend gagal dimulai!")
         backend_log.flush()
-        print_log_tail(backend_log_path)
-        backend_proc.kill()
-        frontend_proc.kill()
-        kill_port(8000)
-        kill_port(5173)
+        if os.path.isfile(backend_log_path):
+            with open(backend_log_path, "r", encoding="utf-8", errors="replace") as f:
+                print("".join(f.readlines()[-15:]))
+        cleanup()
         sys.exit(1)
 
     print("[*] Menunggu layanan Frontend siap...")
@@ -149,21 +175,20 @@ def main():
         time.sleep(0.4)
 
     if not frontend_ready:
-        print("\n[ERROR] Server Frontend gagal dimulai dalam batas waktu!")
-        print("Log Frontend terakhir:")
+        print("\n[ERROR] Server Frontend gagal dimulai pada port 5173!")
         frontend_log.flush()
-        print_log_tail(frontend_log_path)
-        backend_proc.kill()
-        frontend_proc.kill()
-        kill_port(8000)
-        kill_port(5173)
+        if os.path.isfile(frontend_log_path):
+            with open(frontend_log_path, "r", encoding="utf-8", errors="replace") as f:
+                print("".join(f.readlines()[-15:]))
+        cleanup()
         sys.exit(1)
 
     print()
     print("=====================================================================")
-    print("  STATUS: APLIKASI AKTIF & TERHUBUNG KE BROWSER")
+    print("  STATUS: ALLTOOLS-CYBERSEC AKTIF & TERHUBUNG")
     print("  - Web UI        : http://127.0.0.1:5173")
     print("  - Backend API   : http://127.0.0.1:8000")
+    print("  - Swagger Docs  : http://127.0.0.1:8000/docs")
     print("  - Scope Guard   : ACTIVE (Default-Deny Enforced)")
     print("=====================================================================")
     print()
@@ -176,30 +201,31 @@ def main():
 
     print()
     print("---------------------------------------------------------------------")
-    print(" [PETUNJUK PENGGUNAAN]")
-    print(" >> CUKUP TUTUP TAB / JENDELA WEB BROWSER UNTUK KELUAR <<")
-    print(" Aplikasi dan jendela terminal ini akan otomatis berhenti sendiri.")
+    print(" [PETUNJUK]")
+    print(" Aplikasi sedang berjalan.")
+    print(" Cukup TUTUP JENDELA CMD INI atau tekan Ctrl+C untuk mematikan.")
     print("---------------------------------------------------------------------")
     print()
 
     try:
-        # Blocks until backend exits (which happens when the browser is closed)
-        backend_proc.wait()
+        while True:
+            # Check if any child process terminated prematurely
+            if backend_proc.poll() is not None:
+                print("\n[!] Backend terhenti secara tidak terduga.")
+                break
+            if frontend_proc.poll() is not None:
+                print("\n[!] Frontend terhenti secara tidak terduga.")
+                break
+            time.sleep(1.0)
     except KeyboardInterrupt:
-        print("\n[*] Menerima sinyal keyboard (Ctrl+C)...")
+        print("\n[*] Menerima sinyal keluar (Ctrl+C)...")
     finally:
-        print("[*] Web ditutup. Menghentikan seluruh proses server...")
-        try:
-            frontend_proc.terminate()
-            frontend_proc.kill()
-        except Exception:
-            pass
-        kill_port(8000)
-        kill_port(5173)
+        print("[*] Menghentikan seluruh proses server...")
+        cleanup()
         backend_log.close()
         frontend_log.close()
         print("[OK] Seluruh server telah dimatikan secara bersih. Selesai.")
-        time.sleep(1.0)
+        time.sleep(0.8)
 
 
 if __name__ == "__main__":

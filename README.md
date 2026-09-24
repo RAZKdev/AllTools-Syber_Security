@@ -112,15 +112,13 @@ alltools-cybersec/
 - Python 3.10+ (Direkomendasikan Python 3.12 atau 3.14)
 - Node.js v18+ dan npm
 
-### Cara Cepat (1-Click Launcher untuk Windows)
+### Cara Cepat (1-Click Unified Launcher)
 Cukup klik ganda (double-click) file **`start.bat`** di direktori utama:
-- Otomatis memvalidasi dependensi Python dan Node.js
-- Menyiapkan virtual environment dan menginstal paket yang diperlukan jika belum ada
-- Menjalankan Backend (port 8000) dan Frontend (port 5173) secara terkoordinasi
-- Langsung membuka AllTools-CyberSec di browser default (`http://localhost:5173`)
-- **Cara Mematikan Server**: Cukup **tutup tab atau jendela web browser Anda**. Seluruh server dan konsol peluncur akan otomatis mati dan tertutup sendiri secara bersih!
-
-*(Opsional: File **`stop.bat`** tetap tersedia jika sewaktu-waktu ingin mematikan port secara manual).*
+- Otomatis memvalidasi dependensi Python dan Node.js/NPM
+- Otomatis menyiapkan environment backend dan frontend bila belum terpasang
+- Menjalankan Backend (port 8000) dan Frontend (port 5173) secara terpadu
+- Langsung membuka AllTools-CyberSec di browser default (`http://127.0.0.1:5173`)
+- **Cara Mematikan Server**: Cukup **tutup jendela/tab CMD tersebut** (klik tombol `X`) atau tekan `Ctrl+C`. Seluruh proses server akan otomatis dimatikan secara bersih dan port langsung dibebaskan.
 
 ---
 
