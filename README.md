@@ -112,21 +112,34 @@ alltools-cybersec/
 - Python 3.10+ (Direkomendasikan Python 3.12 atau 3.14)
 - Node.js v18+ dan npm
 
-### 1. Menjalankan Backend
+### Cara Cepat (1-Click Launcher untuk Windows)
+Cukup klik ganda (double-click) file **`start.bat`** di direktori utama:
+- Otomatis memvalidasi dependensi Python dan Node.js
+- Menyiapkan virtual environment dan menginstal paket yang diperlukan jika belum ada
+- Menjalankan Backend (FastAPI di port 8000) dan Frontend (Vite di port 5173) secara bersamaan
+- Membuka browser ke `http://localhost:5173` secara otomatis
+
+Untuk mematikan seluruh server, cukup jalankan **`stop.bat`** atau tutup jendela konsol Backend dan Frontend.
+
+---
+
+### Cara Manual
+
+#### 1. Menjalankan Backend
 ```powershell
-# Masuk ke direktori backend dan aktifkan virtual environment
+$env:PYTHONPATH=".;backend"
 .\backend\.venv\Scripts\python -m uvicorn app.main:app --app-dir backend --reload --port 8000
 ```
 *API docs (Swagger UI) dapat diakses di:* `http://localhost:8000/docs`
 
-### 2. Menjalankan Frontend
+#### 2. Menjalankan Frontend
 ```powershell
 cd frontend
 npm run dev
 ```
 *Aplikasi web dapat diakses di:* `http://localhost:5173`
 
-### 3. Menjalankan Seluruh Automated Tests
+#### 3. Menjalankan Seluruh Automated Tests
 ```powershell
 .\backend\.venv\Scripts\pytest -v
 ```
