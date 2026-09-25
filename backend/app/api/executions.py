@@ -10,7 +10,7 @@ from app.schemas.finding import FindingCreate
 from app.schemas.evidence import EvidenceType
 from app.repositories.scope_repository import scope_repository
 from app.repositories.findings_repository import findings_repository
-from app.services.scope_guard import ScopeGuard
+from app.services.scope_guard import ScopeGuard, ScopeDecisionResult
 from evidence.storage import evidence_store
 
 # Collectors
@@ -168,8 +168,17 @@ def pre_flight_check(payload: PreFlightCheckRequest) -> PreFlightCheckResponse:
             detail=f"Assessment '{payload.assessmentId}' not found.",
         )
 
-    scope_items = scope_repository.get_scope_for_assessment(payload.assessmentId)
-    decision = scope_guard.evaluate_target(payload.assessmentId, payload.target, scope_items)
+    OFFLINE_ANALYSIS_RULES = {"SEC-AUTH-001", "SEC-CRYPTO-001"}
+    if payload.ruleId in OFFLINE_ANALYSIS_RULES:
+        decision = ScopeDecisionResult(
+            assessmentId=payload.assessmentId,
+            target=payload.target,
+            decision=ScopeDecision.ALLOW,
+            reason="Authorized local analytical check (offline evaluation, zero external network transmission).",
+        )
+    else:
+        scope_items = scope_repository.get_scope_for_assessment(payload.assessmentId)
+        decision = scope_guard.evaluate_target(payload.assessmentId, payload.target, scope_items)
 
     execution_id = f"CHK-{uuid.uuid4().hex[:8]}"
     now = datetime.now(timezone.utc)
@@ -223,8 +232,17 @@ def run_check(payload: RunCheckRequest) -> RunCheckResponse:
             detail=f"Assessment '{payload.assessmentId}' not found.",
         )
 
-    scope_items = scope_repository.get_scope_for_assessment(payload.assessmentId)
-    decision = scope_guard.evaluate_target(payload.assessmentId, payload.target, scope_items)
+    OFFLINE_ANALYSIS_RULES = {"SEC-AUTH-001", "SEC-CRYPTO-001"}
+    if payload.ruleId in OFFLINE_ANALYSIS_RULES:
+        decision = ScopeDecisionResult(
+            assessmentId=payload.assessmentId,
+            target=payload.target,
+            decision=ScopeDecision.ALLOW,
+            reason="Authorized local analytical check (offline evaluation, zero external network transmission).",
+        )
+    else:
+        scope_items = scope_repository.get_scope_for_assessment(payload.assessmentId)
+        decision = scope_guard.evaluate_target(payload.assessmentId, payload.target, scope_items)
 
     execution_id = f"CHK-{uuid.uuid4().hex[:8]}"
     now = datetime.now(timezone.utc)

@@ -1,8 +1,9 @@
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 import uuid
-from app.schemas.scope import ScopeItem, ScopeItemCreate
-from app.schemas.assessment import Assessment, AssessmentCreate
-from app.schemas.engagement import Engagement, EngagementCreate
+from app.schemas.scope import ScopeItem, ScopeItemCreate, ScopeType
+from app.schemas.assessment import Assessment, AssessmentCreate, AssessmentType, AssessmentStatus
+from app.schemas.engagement import Engagement, EngagementCreate, EngagementStatus
 
 
 class InMemoryScopeRepository:
@@ -12,6 +13,56 @@ class InMemoryScopeRepository:
         self._engagements: Dict[str, Engagement] = {}
         self._assessments: Dict[str, Assessment] = {}
         self._scope_items: Dict[str, ScopeItem] = {}
+        self._seed_defaults()
+
+    def _seed_defaults(self) -> None:
+        now = datetime.now(timezone.utc)
+        self._engagements["ENG-001"] = Engagement(
+            id="ENG-001",
+            workspaceId="WKS-001",
+            name="Laboratory Defensive Security Assessment",
+            description="Default authorized engagement for laboratory evaluation and compliance checks.",
+            assessor="Lead Security Assessor",
+            status=EngagementStatus.ACTIVE,
+            rulesOfEngagement="Defensive evaluation only. Strict adherence to Scope Guard boundary.",
+            createdAt=now,
+        )
+        self._assessments["ASM-001"] = Assessment(
+            id="ASM-001",
+            engagementId="ENG-001",
+            name="Comprehensive Laboratory Assessment",
+            type=AssessmentType.GENERAL,
+            status=AssessmentStatus.RUNNING,
+            startedAt=now,
+            createdAt=now,
+        )
+        self._scope_items["SCP-001"] = ScopeItem(
+            id="SCP-001",
+            engagementId="ENG-001",
+            type=ScopeType.DOMAIN,
+            value="lab.local",
+            environment="lab",
+            inScope=True,
+            notes="Default authorized lab domain and subdomains (*.lab.local)",
+        )
+        self._scope_items["SCP-002"] = ScopeItem(
+            id="SCP-002",
+            engagementId="ENG-001",
+            type=ScopeType.CIDR,
+            value="192.168.1.0/24",
+            environment="lab",
+            inScope=True,
+            notes="Internal laboratory test subnet",
+        )
+        self._scope_items["SCP-003"] = ScopeItem(
+            id="SCP-003",
+            engagementId="ENG-001",
+            type=ScopeType.DOMAIN,
+            value="critical.lab.local",
+            environment="production",
+            inScope=False,
+            notes="Explicitly excluded management host (default-deny exclusion test)",
+        )
 
     # Engagement operations
     def create_engagement(self, data: EngagementCreate) -> Engagement:

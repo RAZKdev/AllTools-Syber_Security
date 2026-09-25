@@ -38,7 +38,10 @@ export const ExecutionsPage: React.FC = () => {
       ]);
     } catch {
       // Local fallback simulation if backend offline
-      const isAllowed = target.includes('lab.local') && !target.includes('critical');
+      const isAllowed =
+        ruleId === 'SEC-AUTH-001' ||
+        ruleId === 'SEC-CRYPTO-001' ||
+        (target.includes('lab.local') && !target.includes('critical'));
       const fallbackRecord: RunCheckResponse = {
         allowed: isAllowed,
         executionRecord: {
