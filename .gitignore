@@ -36,3 +36,9 @@ secrets/
 Thumbs.db
 .vscode/
 .idea/
+
+# Internal documentation & rules (exclude from Git, keep root README.md)
+*.md
+!/README.md
+core/contracts/README.md
+
