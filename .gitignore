@@ -42,3 +42,7 @@ Thumbs.db
 !/README.md
 core/contracts/README.md
 
+# Local launcher scripts (exclude from Git)
+start.bat
+
+
