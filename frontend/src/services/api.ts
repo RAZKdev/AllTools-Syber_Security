@@ -1,3 +1,18 @@
+export interface HealthResponse {
+  status: string;
+  service: string;
+  timestamp: string;
+  version: string;
+}
+
+export interface SecurityRuleMetadata {
+  ruleId: string;
+  title: string;
+  category: string;
+  cwe: string;
+  description: string;
+}
+
 export interface Engagement {
   id: string;
   workspaceId: string;
@@ -62,6 +77,19 @@ export interface PreFlightCheckResponse {
   message: string;
 }
 
+export type ScopeGuardVerificationStatus =
+  | 'VERIFIED_ACTIVE'
+  | 'NO_ACTIVE_ALLOW_RULE'
+  | 'UNVERIFIED'
+  | 'CHECKING';
+
+export interface ScopeGuardProbeResult {
+  status: ScopeGuardVerificationStatus;
+  isVerified: boolean;
+  reason: string;
+  positiveTarget?: string;
+}
+
 export interface Finding {
   id: string;
   assessmentId: string;
@@ -108,13 +136,121 @@ export interface RunCheckResponse {
   message: string;
 }
 
+export class ApiError extends Error {
+  public status: number;
+  public endpoint: string;
+
+  constructor(message: string, status: number, endpoint: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.endpoint = endpoint;
+  }
+}
+
 const API_BASE = '/api/v1';
 
+async function handleResponse<T>(res: Response, endpoint: string): Promise<T> {
+  if (!res.ok) {
+    let errorDetail = res.statusText;
+    try {
+      const errJson = await res.json();
+      errorDetail = errJson.detail || errJson.message || JSON.stringify(errJson);
+    } catch {
+      // Use status text if body not json
+    }
+    throw new ApiError(errorDetail, res.status, endpoint);
+  }
+  return res.json();
+}
+
 export const api = {
+  async getHealth(): Promise<HealthResponse> {
+    const res = await fetch('/health');
+    return handleResponse<HealthResponse>(res, '/health');
+  },
+
+  async probeScopeGuard(assessmentId = 'ASM-001'): Promise<ScopeGuardProbeResult> {
+    try {
+      // Step 1: Negative Assertion (Sentinel out-of-scope target must evaluate to BLOCK)
+      const negativeRes = await api.evaluateScope(assessmentId, 'scopeguard-probe.invalid');
+      if (negativeRes.decision !== 'BLOCK') {
+        return {
+          status: 'UNVERIFIED',
+          isVerified: false,
+          reason: 'Scope Guard failed negative assertion: Unknown probe target was not BLOCKED.',
+        };
+      }
+
+      // Step 2: Fetch scope items to locate an active, unexpired, in-scope rule
+      const scopeItems = await api.getAssessmentScope(assessmentId).catch(() => []);
+      const now = new Date();
+      const activeInScopeRule = scopeItems.find((item) => {
+        if (!item.inScope) return false;
+        if (item.expiresAt && new Date(item.expiresAt) <= now) return false;
+        return true;
+      });
+
+      if (!activeInScopeRule) {
+        return {
+          status: 'NO_ACTIVE_ALLOW_RULE',
+          isVerified: false,
+          reason: 'Default-deny boundary verified, but no active in-scope rules exist to verify positive ALLOW path.',
+        };
+      }
+
+      // Extract positive test target based on active rule
+      let positiveTarget = activeInScopeRule.value.trim();
+      if (activeInScopeRule.type === 'cidr') {
+        const ipPart = positiveTarget.split('/')[0];
+        const segments = ipPart.split('.');
+        if (segments.length === 4) {
+          segments[3] = '1';
+          positiveTarget = segments.join('.');
+        }
+      } else if (activeInScopeRule.type === 'subdomain' && positiveTarget.startsWith('*.')) {
+        positiveTarget = 'test.' + positiveTarget.slice(2);
+      }
+
+      // Step 3: Positive Assertion (Authorized target must evaluate to ALLOW)
+      const positiveRes = await api.evaluateScope(assessmentId, positiveTarget);
+      if (positiveRes.decision === 'ALLOW') {
+        return {
+          status: 'VERIFIED_ACTIVE',
+          isVerified: true,
+          reason: `Dual verification passed: '${positiveTarget}' allowed under rule '${activeInScopeRule.id}', sentinel probe blocked.`,
+          positiveTarget,
+        };
+      }
+
+      return {
+        status: 'UNVERIFIED',
+        isVerified: false,
+        reason: `Scope Guard failed positive assertion: In-scope target '${positiveTarget}' was rejected (${positiveRes.reason}).`,
+        positiveTarget,
+      };
+    } catch (err: any) {
+      return {
+        status: 'UNVERIFIED',
+        isVerified: false,
+        reason: `Scope Guard probe evaluation failed: ${err.message || String(err)}`,
+      };
+    }
+  },
+
+  async getAssessmentScope(assessmentId: string): Promise<ScopeItem[]> {
+    const res = await fetch(`${API_BASE}/assessments/${assessmentId}/scope`);
+    return handleResponse<ScopeItem[]>(res, `${API_BASE}/assessments/${assessmentId}/scope`);
+  },
+
+  async getRules(): Promise<SecurityRuleMetadata[]> {
+    const res = await fetch(`${API_BASE}/executions/rules`);
+    return handleResponse<SecurityRuleMetadata[]>(res, `${API_BASE}/executions/rules`);
+  },
+
   async getEngagements(): Promise<Engagement[]> {
     const res = await fetch(`${API_BASE}/engagements`);
-    if (!res.ok) throw new Error('Failed to fetch engagements');
-    return res.json();
+    return handleResponse<Engagement[]>(res, `${API_BASE}/engagements`);
   },
 
   async createEngagement(data: Partial<Engagement>): Promise<Engagement> {
@@ -123,15 +259,13 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error('Failed to create engagement');
-    return res.json();
+    return handleResponse<Engagement>(res, `${API_BASE}/engagements`);
   },
 
   async getAssessments(engagementId?: string): Promise<Assessment[]> {
     const url = engagementId ? `${API_BASE}/assessments?engagementId=${engagementId}` : `${API_BASE}/assessments`;
     const res = await fetch(url);
-    if (!res.ok) throw new Error('Failed to fetch assessments');
-    return res.json();
+    return handleResponse<Assessment[]>(res, url);
   },
 
   async createAssessment(data: Partial<Assessment>): Promise<Assessment> {
@@ -140,15 +274,13 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error('Failed to create assessment');
-    return res.json();
+    return handleResponse<Assessment>(res, `${API_BASE}/assessments`);
   },
 
   async getScopeItems(engagementId?: string): Promise<ScopeItem[]> {
     const url = engagementId ? `${API_BASE}/scope/items?engagementId=${engagementId}` : `${API_BASE}/scope/items`;
     const res = await fetch(url);
-    if (!res.ok) throw new Error('Failed to fetch scope items');
-    return res.json();
+    return handleResponse<ScopeItem[]>(res, url);
   },
 
   async createScopeItem(data: Partial<ScopeItem>): Promise<ScopeItem> {
@@ -157,8 +289,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
-    if (!res.ok) throw new Error('Failed to create scope item');
-    return res.json();
+    return handleResponse<ScopeItem>(res, `${API_BASE}/scope/items`);
   },
 
   async evaluateScope(assessmentId: string, target: string): Promise<ScopeEvaluationResult> {
@@ -167,8 +298,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ assessmentId, target }),
     });
-    if (!res.ok) throw new Error('Failed to evaluate scope');
-    return res.json();
+    return handleResponse<ScopeEvaluationResult>(res, `${API_BASE}/scope/evaluate`);
   },
 
   async runPreFlightCheck(assessmentId: string, ruleId: string, target: string): Promise<PreFlightCheckResponse> {
@@ -177,8 +307,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ assessmentId, ruleId, target }),
     });
-    if (!res.ok) throw new Error('Failed to run pre-flight check');
-    return res.json();
+    return handleResponse<PreFlightCheckResponse>(res, `${API_BASE}/executions/pre-flight`);
   },
 
   async runCheck(assessmentId: string, ruleId: string, target: string, simulatedData?: any): Promise<RunCheckResponse> {
@@ -187,48 +316,51 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ assessmentId, ruleId, target, simulatedData }),
     });
-    if (!res.ok) throw new Error('Failed to run check');
-    return res.json();
+    return handleResponse<RunCheckResponse>(res, `${API_BASE}/executions/run`);
   },
 
   async getExecutions(assessmentId?: string): Promise<CheckExecutionRecord[]> {
     const url = assessmentId ? `${API_BASE}/executions?assessment_id=${assessmentId}` : `${API_BASE}/executions`;
     const res = await fetch(url);
-    if (!res.ok) throw new Error('Failed to fetch executions');
-    return res.json();
+    return handleResponse<CheckExecutionRecord[]>(res, url);
   },
 
   async getFindings(assessmentId?: string): Promise<Finding[]> {
     const url = assessmentId ? `${API_BASE}/findings?assessmentId=${assessmentId}` : `${API_BASE}/findings`;
     const res = await fetch(url);
-    if (!res.ok) throw new Error('Failed to fetch findings');
-    return res.json();
+    return handleResponse<Finding[]>(res, url);
   },
 
   async getFinding(findingId: string): Promise<Finding> {
-    const res = await fetch(`${API_BASE}/findings/${findingId}`);
-    if (!res.ok) throw new Error('Failed to fetch finding');
-    return res.json();
+    const url = `${API_BASE}/findings/${findingId}`;
+    const res = await fetch(url);
+    return handleResponse<Finding>(res, url);
   },
 
   async getEvidence(assessmentId?: string, findingId?: string): Promise<Evidence[]> {
     const params = new URLSearchParams();
     if (assessmentId) params.append('assessmentId', assessmentId);
     if (findingId) params.append('findingId', findingId);
-    const res = await fetch(`${API_BASE}/evidence?${params.toString()}`);
-    if (!res.ok) throw new Error('Failed to fetch evidence');
-    return res.json();
+    const url = `${API_BASE}/evidence?${params.toString()}`;
+    const res = await fetch(url);
+    return handleResponse<Evidence[]>(res, url);
   },
 
   async getReportMarkdown(assessmentId: string): Promise<string> {
-    const res = await fetch(`${API_BASE}/reports/${assessmentId}/markdown`);
-    if (!res.ok) throw new Error('Failed to fetch Markdown report');
+    const url = `${API_BASE}/reports/${assessmentId}/markdown`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new ApiError(res.statusText, res.status, url);
+    }
     return res.text();
   },
 
   async getReportHtml(assessmentId: string): Promise<string> {
-    const res = await fetch(`${API_BASE}/reports/${assessmentId}/html`);
-    if (!res.ok) throw new Error('Failed to fetch HTML report');
+    const url = `${API_BASE}/reports/${assessmentId}/html`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new ApiError(res.statusText, res.status, url);
+    }
     return res.text();
   },
 };

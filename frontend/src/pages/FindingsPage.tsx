@@ -1,271 +1,455 @@
 import React, { useState, useEffect } from 'react';
-import { ShieldCheck } from 'lucide-react';
-import { api, Finding } from '@/services/api';
-import { StatusBadge } from '@/components/StatusBadge';
+import {
+  AlertTriangle,
+  Search,
+  Filter,
+  RefreshCw,
+  FileCode,
+} from 'lucide-react';
+import {
+  api,
+  Finding,
+  Evidence,
+} from '@/services/api';
+import { DEMO_FINDINGS, DEMO_EVIDENCE } from '@/demo/fixtures';
+import { DataTable, DataTableColumn } from '@/components/DataTable';
 import { SeverityBadge } from '@/components/SeverityBadge';
-import { EmptyState } from '@/components/EmptyState';
+import { StatusBadge } from '@/components/StatusBadge';
+import { DetailPanel, DetailTab } from '@/components/DetailPanel';
+import { StatePanel } from '@/components/StatePanel';
+import { DemoBadge } from '@/components/DemoBadge';
+import { KeyValue } from '@/components/KeyValue';
+import { FilterTabs } from '@/components/FilterTabs';
 
-export const FindingsPage: React.FC = () => {
+interface FindingsPageProps {
+  isDemoMode: boolean;
+}
+
+export const FindingsPage: React.FC<FindingsPageProps> = ({ isDemoMode }) => {
   const [findings, setFindings] = useState<Finding[]>([]);
+  const [evidenceList, setEvidenceList] = useState<Evidence[]>([]);
   const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null);
-  const [filterSeverity, setFilterSeverity] = useState<string>('all');
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const defaultSampleFindings: Finding[] = [
+  // Filters
+  const [filterSeverity, setFilterSeverity] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+
+  const loadData = async () => {
+    setLoading(true);
+    setError(null);
+    setSelectedFinding(null);
+
+    if (isDemoMode) {
+      setFindings(DEMO_FINDINGS);
+      setEvidenceList(DEMO_EVIDENCE);
+      setSelectedFinding(DEMO_FINDINGS[0] || null);
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const [fndRes, evdRes] = await Promise.all([
+        api.getFindings().catch(() => []),
+        api.getEvidence().catch(() => []),
+      ]);
+
+      setFindings(fndRes);
+      setEvidenceList(evdRes);
+      setSelectedFinding(fndRes.length > 0 ? fndRes[0] : null);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to retrieve findings from backend');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+  }, [isDemoMode]);
+
+  const filteredFindings = findings.filter((f) => {
+    if (filterSeverity !== 'all' && f.severity !== filterSeverity) {
+      return false;
+    }
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      return (
+        f.title.toLowerCase().includes(q) ||
+        (f.description && f.description.toLowerCase().includes(q)) ||
+        (f.ruleId && f.ruleId.toLowerCase().includes(q)) ||
+        (f.cwe && f.cwe.toLowerCase().includes(q)) ||
+        f.id.toLowerCase().includes(q)
+      );
+    }
+    return true;
+  });
+
+  const matchedEvidence = selectedFinding
+    ? evidenceList.filter((e) => e.findingId === selectedFinding.id)
+    : [];
+
+  const columns: DataTableColumn<Finding>[] = [
     {
-      id: 'FND-001',
-      assessmentId: 'ASM-001',
-      assetId: 'AST-001',
-      ruleId: 'SEC-WEB-001',
-      title: 'Missing Defensive HTTP Security Headers (4 missing)',
-      description: 'The target web service does not return Content-Security-Policy, Strict-Transport-Security, X-Content-Type-Options, or X-Frame-Options.',
-      status: 'NEEDS_REVIEW',
-      severity: 'medium',
-      confidence: 'high',
-      cwe: 'CWE-693',
-      impact: 'Browsers connecting to this endpoint lack defensive framing, MIME sniffing protections, and XSS restrictions.',
-      recommendation: 'Configure reverse proxy to enforce HSTS, CSP, X-Content-Type-Options: nosniff, and X-Frame-Options: DENY.',
-      createdAt: new Date().toISOString(),
+      key: 'severity',
+      label: 'Severity',
+      width: '100px',
+      render: (row) => <SeverityBadge severity={row.severity} size="sm" />,
     },
     {
-      id: 'FND-002',
-      assessmentId: 'ASM-001',
-      assetId: 'AST-002',
-      ruleId: 'SEC-TLS-001',
-      title: 'Expired TLS Certificate',
-      description: 'The TLS certificate expired and can no longer establish trusted encrypted sessions.',
-      status: 'NEEDS_REVIEW',
-      severity: 'high',
-      confidence: 'high',
-      cwe: 'CWE-298',
-      impact: 'Clients will encounter certificate validation failures and warn users against continuing.',
-      recommendation: 'Renew TLS certificate with an authorized Certificate Authority.',
-      createdAt: new Date().toISOString(),
+      key: 'id',
+      label: 'Finding ID',
+      width: '110px',
+      render: (row) => (
+        <code style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
+          {row.id}
+        </code>
+      ),
+    },
+    {
+      key: 'title',
+      label: 'Vulnerability Title',
+      render: (row) => (
+        <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+          {row.title}
+        </span>
+      ),
+    },
+    {
+      key: 'ruleId',
+      label: 'Rule Module',
+      width: '110px',
+      render: (row) => (
+        <code style={{ color: 'var(--accent)', fontSize: '11px' }}>
+          {row.ruleId || '—'}
+        </code>
+      ),
+    },
+    {
+      key: 'status',
+      label: 'Status',
+      width: '120px',
+      render: (row) => <StatusBadge status={row.status} size="sm" />,
+    },
+    {
+      key: 'assetId',
+      label: 'Asset',
+      width: '100px',
+      render: (row) => (
+        <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
+          {row.assetId}
+        </span>
+      ),
     },
   ];
 
-  useEffect(() => {
-    const fetchFindings = async () => {
-      try {
-        const data = await api.getFindings();
-        if (data && data.length > 0) {
-          setFindings(data);
-          setSelectedFinding(data[0]);
-        } else {
-          setFindings(defaultSampleFindings);
-          setSelectedFinding(defaultSampleFindings[0]);
-        }
-      } catch {
-        setFindings(defaultSampleFindings);
-        setSelectedFinding(defaultSampleFindings[0]);
-      }
-    };
-    fetchFindings();
-  }, []);
-
-  const filteredFindings = findings.filter((f) => {
-    if (filterSeverity === 'all') return true;
-    return f.severity === filterSeverity;
-  });
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      {/* Header */}
-      <div>
-        <h1 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)' }}>
-          Vulnerability Findings & Risk Review
-        </h1>
-        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-          Evidence-first validation. Findings must be backed by verifiable observations and cryptographic evidence.
-        </p>
-      </div>
-
-      {/* Filter Bar */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          padding: '12px 18px',
-          backgroundColor: 'var(--bg-surface)',
-          borderRadius: '8px',
-          border: '1px solid var(--border-subtle)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
-          <span style={{ color: 'var(--text-secondary)' }}>Filter by Severity:</span>
-          {['all', 'critical', 'high', 'medium', 'low'].map((sev) => (
-            <button
-              key={sev}
-              onClick={() => setFilterSeverity(sev)}
-              style={{
-                padding: '4px 10px',
-                borderRadius: '4px',
-                fontSize: '11px',
-                fontWeight: 600,
-                textTransform: 'uppercase',
-                fontFamily: 'var(--font-mono)',
-                backgroundColor: filterSeverity === sev ? 'var(--bg-surface-elevated)' : 'transparent',
-                color: filterSeverity === sev ? 'var(--accent)' : 'var(--text-muted)',
-                border: filterSeverity === sev ? '1px solid var(--accent)' : '1px solid transparent',
-              }}
-            >
-              {sev}
-            </button>
-          ))}
-        </div>
-        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-          Showing {filteredFindings.length} findings
-        </span>
-      </div>
-
-      {/* Main Split Layout: Findings List + Detail Inspector */}
-      {filteredFindings.length === 0 ? (
-        <EmptyState
-          icon={ShieldCheck}
-          title="No findings matching filter"
-          description="All executed checks have passed or no findings matched the selected severity level."
-        />
-      ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '20px', alignItems: 'start' }}>
-          {/* Findings List */}
-          <div
-            style={{
-              backgroundColor: 'var(--bg-surface)',
-              borderRadius: '8px',
-              border: '1px solid var(--border-subtle)',
-              overflow: 'hidden',
-            }}
-          >
-            <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-subtle)', fontWeight: 600, fontSize: '13px' }}>
-              Discovered Findings
-            </div>
-            {filteredFindings.map((f) => {
-              const isSelected = selectedFinding?.id === f.id;
-              return (
-                <div
-                  key={f.id}
-                  onClick={() => setSelectedFinding(f)}
-                  style={{
-                    padding: '16px 18px',
-                    borderBottom: '1px solid var(--border-subtle)',
-                    cursor: 'pointer',
-                    backgroundColor: isSelected ? 'var(--bg-surface-elevated)' : 'transparent',
-                    borderLeft: isSelected ? '3px solid var(--accent)' : '3px solid transparent',
-                    transition: 'all 0.15s ease',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                      <SeverityBadge severity={f.severity} size="sm" />
-                      <span style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
-                        {f.id}
-                      </span>
-                    </div>
-                    <StatusBadge status={f.status} size="sm" />
-                  </div>
-                  <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '4px' }}>
-                    {f.title}
-                  </div>
-                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', gap: '14px' }}>
-                    <span>Rule: <code style={{ color: 'var(--accent)' }}>{f.ruleId || 'N/A'}</code></span>
-                    {f.cwe && <span>{f.cwe}</span>}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Finding Detail Inspector (DESIGN.md Section 8) */}
-          {selectedFinding ? (
-            <div
-              style={{
-                backgroundColor: 'var(--bg-surface)',
-                borderRadius: '8px',
-                border: '1px solid var(--border-default)',
-                padding: '24px',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '18px',
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
-                  {selectedFinding.id} • {selectedFinding.ruleId}
-                </span>
-                <div style={{ display: 'flex', gap: '8px' }}>
+  // Multi-tab detail inspector
+  const inspectorTabs: DetailTab[] = selectedFinding
+    ? [
+        {
+          id: 'advisory',
+          label: 'Advisory Overview',
+          content: (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '6px' }}>
                   <SeverityBadge severity={selectedFinding.severity} />
                   <StatusBadge status={selectedFinding.status} />
+                  {selectedFinding.cwe && (
+                    <span className="wb-chip" style={{ background: 'var(--bg-surface-elevated)' }}>
+                      {selectedFinding.cwe}
+                    </span>
+                  )}
                 </div>
-              </div>
-
-              <div>
-                <h2 style={{ fontSize: '16px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '6px' }}>
+                <h2 style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
                   {selectedFinding.title}
                 </h2>
-                <div style={{ display: 'flex', gap: '12px', fontSize: '12px', color: 'var(--text-secondary)' }}>
-                  <span>Asset: <code style={{ color: 'var(--text-primary)' }}>{selectedFinding.assetId}</code></span>
-                  {selectedFinding.cwe && <span>CWE: <strong style={{ color: 'var(--accent)' }}>{selectedFinding.cwe}</strong></span>}
-                  <span>Confidence: <strong style={{ textTransform: 'capitalize' }}>{selectedFinding.confidence}</strong></span>
-                </div>
               </div>
 
               <div>
-                <h3 style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '6px' }}>
-                  Description & Context
-                </h3>
-                <p style={{ fontSize: '13px', color: 'var(--text-primary)', lineHeight: 1.6 }}>
-                  {selectedFinding.description}
-                </p>
+                <div
+                  style={{
+                    fontSize: '10px',
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    color: 'var(--text-muted)',
+                    marginBottom: '4px',
+                  }}
+                >
+                  Technical Description & Vulnerability Details
+                </div>
+                <div style={{ fontSize: '12px', color: 'var(--text-primary)', lineHeight: 1.6 }}>
+                  {selectedFinding.description || 'No description recorded.'}
+                </div>
               </div>
 
               {selectedFinding.impact && (
                 <div
                   style={{
-                    padding: '12px 14px',
-                    borderRadius: '6px',
-                    backgroundColor: 'rgba(239, 68, 68, 0.08)',
-                    border: '1px solid rgba(239, 68, 68, 0.25)',
+                    padding: '10px 12px',
+                    background: 'var(--sev-high-bg)',
+                    border: '1px solid var(--sev-high-border)',
+                    borderRadius: '4px',
                   }}
                 >
-                  <h4 style={{ fontSize: '12px', fontWeight: 700, color: 'var(--sev-high-text)', marginBottom: '4px' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--sev-high-text)', marginBottom: '2px' }}>
                     Technical Impact
-                  </h4>
-                  <p style={{ fontSize: '12px', color: 'var(--text-primary)' }}>
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-primary)', lineHeight: 1.5 }}>
                     {selectedFinding.impact}
-                  </p>
+                  </div>
                 </div>
               )}
-
-              {selectedFinding.recommendation && (
-                <div
-                  style={{
-                    padding: '12px 14px',
-                    borderRadius: '6px',
-                    backgroundColor: 'rgba(56, 189, 248, 0.08)',
-                    border: '1px solid rgba(56, 189, 248, 0.25)',
-                  }}
-                >
-                  <h4 style={{ fontSize: '12px', fontWeight: 700, color: 'var(--accent)', marginBottom: '4px' }}>
-                    Remediation Guidance
-                  </h4>
-                  <pre style={{ fontSize: '12px', color: 'var(--text-primary)', whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>
-                    {selectedFinding.recommendation}
-                  </pre>
-                </div>
-              )}
-
-              <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: 'var(--text-muted)' }}>
-                <span>Lifecycle: Needs Review → Confirmed → Retest</span>
-                <span>Created: {new Date(selectedFinding.createdAt).toLocaleDateString()}</span>
+            </div>
+          ),
+        },
+        {
+          id: 'remediation',
+          label: 'Remediation',
+          content: (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <div
+                style={{
+                  fontSize: '10px',
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  color: 'var(--accent)',
+                }}
+              >
+                Actionable Remediation Guidance
               </div>
+              <pre
+                style={{
+                  fontSize: '12px',
+                  fontFamily: 'inherit',
+                  color: 'var(--text-primary)',
+                  lineHeight: 1.6,
+                  whiteSpace: 'pre-wrap',
+                  background: 'var(--bg-table-zebra)',
+                  padding: '12px',
+                  border: '1px solid var(--border-default)',
+                  borderRadius: '4px',
+                }}
+              >
+                {selectedFinding.recommendation || 'No specific remediation recommendation provided.'}
+              </pre>
             </div>
-          ) : (
+          ),
+        },
+        {
+          id: 'evidence',
+          label: `Evidence (${matchedEvidence.length})`,
+          content: (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {matchedEvidence.length > 0 ? (
+                matchedEvidence.map((evd) => (
+                  <div
+                    key={evd.id}
+                    style={{
+                      background: 'var(--bg-table-zebra)',
+                      border: '1px solid var(--border-default)',
+                      padding: '12px',
+                      borderRadius: '4px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '6px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <code style={{ fontWeight: 700, color: 'var(--accent)' }}>
+                        {evd.id}
+                      </code>
+                      <span className="wb-chip" style={{ background: 'var(--bg-surface-elevated)' }}>
+                        {evd.type}
+                      </span>
+                    </div>
+
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                      Source Target: <code>{evd.source || '—'}</code>
+                    </div>
+
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                      SHA-256 Digest:
+                      <code
+                        style={{
+                          display: 'block',
+                          color: 'var(--text-primary)',
+                          background: 'var(--bg-surface)',
+                          padding: '4px 6px',
+                          marginTop: '2px',
+                          wordBreak: 'break-all',
+                        }}
+                      >
+                        {evd.sha256}
+                      </code>
+                    </div>
+
+                    {evd.notes && (
+                      <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                        Notes: {evd.notes}
+                      </div>
+                    )}
+                  </div>
+                ))
+              ) : (
+                <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <FileCode size={24} style={{ margin: '0 auto 8px auto', display: 'block', opacity: 0.5 }} />
+                  No cryptographic evidence attachments recorded for finding {selectedFinding.id}.
+                </div>
+              )}
+            </div>
+          ),
+        },
+        {
+          id: 'metadata',
+          label: 'Metadata & Audit',
+          content: (
+            <KeyValue
+              items={[
+                { key: 'Finding ID', value: selectedFinding.id },
+                { key: 'Assessment ID', value: selectedFinding.assessmentId },
+                { key: 'Asset ID', value: selectedFinding.assetId },
+                { key: 'Rule Module', value: selectedFinding.ruleId || 'N/A' },
+                { key: 'Classification', value: selectedFinding.cwe || 'None' },
+                { key: 'CVE Reference', value: selectedFinding.cve || 'None' },
+                { key: 'CVSS Score', value: selectedFinding.cvss ?? 'Not scored' },
+                { key: 'Confidence', value: selectedFinding.confidence.toUpperCase() },
+                { key: 'Status', value: selectedFinding.status },
+                {
+                  key: 'Discovered (UTC)',
+                  value: new Date(selectedFinding.createdAt).toUTCString(),
+                },
+              ]}
+            />
+          ),
+        },
+      ]
+    : [
+        {
+          id: 'none',
+          label: 'Advisory Overview',
+          content: (
             <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-muted)' }}>
-              Select a finding to inspect detailed risk and evidence.
+              Select a finding from the table to inspect details and cryptographic evidence.
             </div>
-          )}
+          ),
+        },
+      ];
+
+  if (loading && !isDemoMode) {
+    return <StatePanel kind="loading" title="Retrieving Discovered Findings..." />;
+  }
+
+  if (error && !isDemoMode) {
+    return (
+      <StatePanel
+        kind="offline"
+        title="Findings Repository Offline"
+        description="Could not query vulnerability findings from local backend API."
+        errorMessage={error}
+        onRetry={loadData}
+      />
+    );
+  }
+
+  return (
+    <div className="wb-split-h">
+      {/* =========================================================================
+          Left Pane: Findings Table with Search & Filter Tabs
+          ========================================================================= */}
+      <div className="wb-panel">
+        <div className="wb-panel-header">
+          <div className="wb-panel-title">
+            <AlertTriangle size={14} color="var(--sev-high-text)" />
+            <span>Discovered Vulnerability Findings</span>
+            <span className="wb-panel-count">{filteredFindings.length}</span>
+            {isDemoMode && <DemoBadge />}
+          </div>
+          <button
+            onClick={loadData}
+            className="wb-btn wb-btn-sm"
+            title="Refresh findings from backend"
+          >
+            <RefreshCw size={10} />
+            Refresh
+          </button>
         </div>
-      )}
+
+        <div className="wb-toolbar">
+          <div className="wb-toolbar-group">
+            <Filter size={12} color="var(--text-muted)" />
+            <FilterTabs
+              options={[
+                { id: 'all', label: 'All', count: findings.length },
+                {
+                  id: 'critical',
+                  label: 'Critical',
+                  count: findings.filter((f) => f.severity === 'critical').length,
+                },
+                {
+                  id: 'high',
+                  label: 'High',
+                  count: findings.filter((f) => f.severity === 'high').length,
+                },
+                {
+                  id: 'medium',
+                  label: 'Medium',
+                  count: findings.filter((f) => f.severity === 'medium').length,
+                },
+                {
+                  id: 'low',
+                  label: 'Low',
+                  count: findings.filter((f) => f.severity === 'low').length,
+                },
+              ]}
+              activeId={filterSeverity}
+              onChange={setFilterSeverity}
+            />
+          </div>
+
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <Search size={12} color="var(--text-muted)" />
+            <input
+              type="text"
+              className="wb-input"
+              placeholder="Search title, CWE, rule..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{ width: '160px', padding: '3px 6px', fontSize: '11px' }}
+            />
+          </div>
+        </div>
+
+        <div className="wb-panel-body">
+          <DataTable
+            columns={columns}
+            data={filteredFindings}
+            keyExtractor={(row) => row.id}
+            selectedId={selectedFinding?.id}
+            onSelectRow={(row) => setSelectedFinding(row)}
+            emptyMessage={
+              searchQuery || filterSeverity !== 'all'
+                ? 'No findings match the current filter criteria.'
+                : 'No vulnerability findings recorded. Execute checks from the Check Executions tab.'
+            }
+          />
+        </div>
+      </div>
+
+      {/* =========================================================================
+          Right Pane: Multi-Tab Detail Inspector
+          ========================================================================= */}
+      <div style={{ height: '100%', overflow: 'hidden' }}>
+        <DetailPanel
+          title={
+            selectedFinding
+              ? `Finding Inspector: ${selectedFinding.id}`
+              : 'Finding Inspector'
+          }
+          tabs={inspectorTabs}
+        />
+      </div>
     </div>
   );
 };

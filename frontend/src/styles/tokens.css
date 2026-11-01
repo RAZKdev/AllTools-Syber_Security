@@ -1,69 +1,99 @@
 :root {
-  /* Color Palette - Dark First Professional Security Workbench */
-  --bg-canvas: #090d16;
-  --bg-surface: #0f172a;
-  --bg-surface-elevated: #1e293b;
-  --bg-surface-hover: #273549;
+  /* ==========================================================================
+     Burp Suite Professional Inspired Defensive Security Graphite Theme
+     ========================================================================== */
 
-  --border-subtle: #1e293b;
-  --border-default: #334155;
-  --border-strong: #475569;
-  --border-focus: #38bdf8;
+  /* Base Backgrounds (Dark Graphite / Charcoal) */
+  --bg-canvas: #0c0e12;
+  --bg-surface: #14171d;
+  --bg-surface-elevated: #1a1e26;
+  --bg-surface-hover: #222732;
+  --bg-surface-active: #2a313e;
+  --bg-panel-header: #181c24;
+  --bg-table-header: #161a22;
+  --bg-table-row: #14171d;
+  --bg-table-zebra: #101319;
+  --bg-table-selected: #1e2838;
+  --bg-table-hover: #1b212c;
 
-  --text-primary: #f8fafc;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
+  /* Structural 1px Borders */
+  --border-subtle: #202530;
+  --border-default: #2a3140;
+  --border-strong: #3b4457;
+  --border-focus: #4b88ff;
 
-  --accent: #38bdf8;
-  --accent-muted: rgba(56, 189, 248, 0.12);
+  /* Technical Typography Colors */
+  --text-primary: #e4e7ed;
+  --text-secondary: #9aa2b2;
+  --text-muted: #677082;
+  --text-inverse: #0c0e12;
+
+  /* Accent & Interactive (Muted Cyan / Blue) */
+  --accent: #4b88ff;
+  --accent-hover: #6ea1ff;
+  --accent-active: #3a75e6;
+  --accent-muted: rgba(75, 136, 255, 0.12);
+  --accent-border: rgba(75, 136, 255, 0.35);
 
   /* Status Tokens */
-  --status-pass-text: #34d399;
-  --status-pass-bg: rgba(16, 185, 129, 0.12);
-  --status-pass-border: rgba(16, 185, 129, 0.3);
+  --status-pass-text: #3ec487;
+  --status-pass-bg: rgba(62, 196, 135, 0.12);
+  --status-pass-border: rgba(62, 196, 135, 0.35);
 
-  --status-fail-text: #f87171;
-  --status-fail-bg: rgba(239, 68, 68, 0.14);
-  --status-fail-border: rgba(239, 68, 68, 0.35);
+  --status-fail-text: #f06a6a;
+  --status-fail-bg: rgba(240, 106, 106, 0.14);
+  --status-fail-border: rgba(240, 106, 106, 0.38);
 
-  --status-warn-text: #fbbf24;
-  --status-warn-bg: rgba(245, 158, 11, 0.14);
-  --status-warn-border: rgba(245, 158, 11, 0.35);
+  --status-warn-text: #e8a838;
+  --status-warn-bg: rgba(232, 168, 56, 0.14);
+  --status-warn-border: rgba(232, 168, 56, 0.38);
 
-  --status-error-text: #fb7185;
-  --status-error-bg: rgba(244, 63, 94, 0.15);
-  --status-error-border: rgba(244, 63, 94, 0.4);
+  --status-error-text: #ff6b81;
+  --status-error-bg: rgba(255, 107, 129, 0.15);
+  --status-error-border: rgba(255, 107, 129, 0.4);
 
-  --status-blocked-text: #f43f5e;
-  --status-blocked-bg: rgba(225, 29, 72, 0.16);
-  --status-blocked-border: rgba(225, 29, 72, 0.45);
+  --status-blocked-text: #ff5277;
+  --status-blocked-bg: rgba(255, 82, 119, 0.16);
+  --status-blocked-border: rgba(255, 82, 119, 0.45);
 
-  --status-neutral-text: #94a3b8;
-  --status-neutral-bg: rgba(148, 163, 184, 0.12);
-  --status-neutral-border: rgba(148, 163, 184, 0.25);
+  --status-neutral-text: #8e98a8;
+  --status-neutral-bg: rgba(142, 152, 168, 0.12);
+  --status-neutral-border: rgba(142, 152, 168, 0.28);
 
-  /* Severity Tokens */
-  --sev-critical-text: #f87171;
-  --sev-critical-bg: rgba(239, 68, 68, 0.15);
-  --sev-critical-border: rgba(239, 68, 68, 0.4);
+  /* Severity Levels (Burp / CVSS standard) */
+  --sev-critical-text: #ff4757;
+  --sev-critical-bg: rgba(255, 71, 87, 0.18);
+  --sev-critical-border: rgba(255, 71, 87, 0.45);
 
-  --sev-high-text: #fb923c;
-  --sev-high-bg: rgba(249, 115, 22, 0.15);
-  --sev-high-border: rgba(249, 115, 22, 0.4);
+  --sev-high-text: #ff7f50;
+  --sev-high-bg: rgba(255, 127, 80, 0.16);
+  --sev-high-border: rgba(255, 127, 80, 0.42);
 
-  --sev-medium-text: #fbbf24;
-  --sev-medium-bg: rgba(245, 158, 11, 0.15);
-  --sev-medium-border: rgba(245, 158, 11, 0.4);
+  --sev-medium-text: #ffa502;
+  --sev-medium-bg: rgba(255, 165, 2, 0.15);
+  --sev-medium-border: rgba(255, 165, 2, 0.4);
 
-  --sev-low-text: #60a5fa;
-  --sev-low-bg: rgba(59, 130, 246, 0.15);
-  --sev-low-border: rgba(59, 130, 246, 0.4);
+  --sev-low-text: #3498db;
+  --sev-low-bg: rgba(52, 152, 219, 0.15);
+  --sev-low-border: rgba(52, 152, 219, 0.38);
 
-  --sev-info-text: #94a3b8;
-  --sev-info-bg: rgba(148, 163, 184, 0.15);
-  --sev-info-border: rgba(148, 163, 184, 0.3);
+  --sev-info-text: #9aa2b2;
+  --sev-info-bg: rgba(154, 162, 178, 0.12);
+  --sev-info-border: rgba(154, 162, 178, 0.28);
 
-  /* Fonts */
-  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  /* Demo Banner Highlight */
+  --demo-banner-bg: #804c00;
+  --demo-banner-border: #b36b00;
+  --demo-banner-text: #ffe0b2;
+
+  /* Font Stacks (Local offline-first fallback) */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", "Fira Code", "SF Mono", Consolas, Menlo, monospace;
+
+  /* Layout Constants */
+  --topbar-height: 40px;
+  --tabbar-height: 32px;
+  --statusbar-height: 26px;
+  --table-row-height: 32px;
+  --header-cell-height: 30px;
 }

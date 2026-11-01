@@ -1,92 +1,42 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, Download, Printer, RefreshCw, CheckCircle2 } from 'lucide-react';
+import {
+  FileText,
+  Download,
+  Printer,
+  RefreshCw,
+  AlertCircle,
+} from 'lucide-react';
 import { api } from '@/services/api';
+import { DEMO_REPORT_MARKDOWN } from '@/demo/fixtures';
+import { StatePanel } from '@/components/StatePanel';
+import { DemoBadge } from '@/components/DemoBadge';
 
-export const ReportsPage: React.FC = () => {
+interface ReportsPageProps {
+  isDemoMode: boolean;
+}
+
+export const ReportsPage: React.FC<ReportsPageProps> = ({ isDemoMode }) => {
   const [reportMarkdown, setReportMarkdown] = useState<string>('');
-  const [loading, setLoading] = useState<boolean>(false);
-  const assessmentId = 'ASM-001';
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const defaultSampleMarkdown = `# Defensive Security Assessment Report — Local Lab Assessment
-
-## 1. Metadata
-- **Engagement ID:** \`ENG-001\`
-- **Assessment ID:** \`ASM-001\`
-- **Assessment Name:** Infrastructure & Web Assessment
-- **Assessor:** Authorized Operator
-- **Report Date:** ${new Date().toISOString().replace('T', ' ').substring(0, 19)} UTC
-- **Status:** COMPLETED
-
-## 2. Executive Summary
-This defensive security assessment was conducted under authorized rules of engagement.
-A total of **2** finding(s) were identified across the verified scope.
-Summary breakdown: **0** Critical, **1** High, **1** Medium, **0** Low, and **0** Informational.
-
-## 3. Authorized Scope Boundary
-| Rule ID | Type | Target Pattern | Policy | Environment |
-|---|---|---|---|---|
-| \`SCP-001\` | domain | \`lab.local\` | **IN SCOPE (Allow)** | lab |
-| \`SCP-002\` | cidr | \`192.168.1.0/24\` | **IN SCOPE (Allow)** | lab |
-| \`SCP-003\` | domain | \`critical.lab.local\` | **EXCLUDED (Strict Block)** | production |
-
-## 4. Methodology & Scope Guard Verification
-All assessments were executed through the AllTools-CyberSec defensive workbench.
-Every target query passed strict \`Scope Guard\` pre-flight validation enforcing fail-closed
-default-deny behavior. Out-of-scope targets were strictly blocked before transmission.
-
-## 5. Summary of Findings
-| ID | Severity | Title | CWE | Status |
-|---|---|---|---|---|
-| \`FND-001\` | **MEDIUM** | Missing Defensive HTTP Security Headers (4 missing) | CWE-693 | NEEDS_REVIEW |
-| \`FND-002\` | **HIGH** | Expired TLS Certificate | CWE-298 | NEEDS_REVIEW |
-
-## 6. Detailed Findings & Recommendations
-### [FND-001] Missing Defensive HTTP Security Headers
-- **Severity:** \`MEDIUM\` | **Confidence:** \`high\` | **Status:** \`NEEDS_REVIEW\`
-- **Classification:** \`CWE-693\`
-
-#### Observed Fact & Description
-The web service at app.lab.local does not return recommended defensive headers.
-
-#### Technical Impact
-Clients connecting to this endpoint lack browser-level protections such as HSTS enforcement.
-
-#### Remediation Recommendation
-Configure reverse proxy to enforce HSTS, CSP, and X-Content-Type-Options: nosniff.
-
-### [FND-002] Expired TLS Certificate
-- **Severity:** \`HIGH\` | **Confidence:** \`high\` | **Status:** \`NEEDS_REVIEW\`
-- **Classification:** \`CWE-298\`
-
-#### Observed Fact & Description
-The TLS certificate presented by the server has expired.
-
-#### Remediation Recommendation
-Renew the TLS certificate immediately with an authorized Certificate Authority.
-
-## 7. Cryptographic Evidence Log
-| Evidence ID | Type | Source Target | SHA-256 Digest | Redacted |
-|---|---|---|---|---|
-| \`EVD-001\` | http_response | \`https://app.lab.local\` | \`7f83b1657ff1fc53...\` | No |
-| \`EVD-002\` | configuration_snapshot | \`app.lab.local:443\` | \`9f86d081884c7d65...\` | No |
-
-## 8. Appendix & Standards References
-- [OWASP Secure Headers Project](https://owasp.org/www-project-secure-headers/)
-- [RFC 7208 — Sender Policy Framework (SPF)](https://www.rfc-editor.org/rfc/rfc7208)
-- [RFC 7489 — Domain-based Message Authentication, Reporting, and Conformance (DMARC)](https://www.rfc-editor.org/rfc/rfc7489)
-`;
+  const assessmentId = isDemoMode ? 'DEMO-ASM-001' : 'ASM-001';
 
   const fetchReport = async () => {
     setLoading(true);
+    setError(null);
+
+    if (isDemoMode) {
+      setReportMarkdown(DEMO_REPORT_MARKDOWN);
+      setLoading(false);
+      return;
+    }
+
     try {
       const md = await api.getReportMarkdown(assessmentId);
-      if (md && md.length > 50) {
-        setReportMarkdown(md);
-      } else {
-        setReportMarkdown(defaultSampleMarkdown);
-      }
-    } catch {
-      setReportMarkdown(defaultSampleMarkdown);
+      setReportMarkdown(md);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to generate markdown report from backend API');
     } finally {
       setLoading(false);
     }
@@ -94,14 +44,14 @@ Renew the TLS certificate immediately with an authorized Certificate Authority.
 
   useEffect(() => {
     fetchReport();
-  }, []);
+  }, [isDemoMode]);
 
   const handleDownloadMarkdown = () => {
     const blob = new Blob([reportMarkdown], { type: 'text/markdown;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `report-${assessmentId}.md`;
+    link.download = `audit-report-${assessmentId}.md`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -109,133 +59,111 @@ Renew the TLS certificate immediately with an authorized Certificate Authority.
   };
 
   const handlePrintHtml = () => {
+    if (isDemoMode) {
+      window.print();
+      return;
+    }
     window.open(`/api/v1/reports/${assessmentId}/html`, '_blank');
   };
 
+  if (loading && !isDemoMode) {
+    return <StatePanel kind="loading" title="Compiling Audit Report..." />;
+  }
+
+  if (error && !isDemoMode) {
+    return (
+      <StatePanel
+        kind="offline"
+        title="Report Generator Offline"
+        description="Could not compile defensive security report from backend API."
+        errorMessage={error}
+        onRetry={fetchReport}
+      />
+    );
+  }
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
-          <h1 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)' }}>
-            Defensive Security Assessment Reports
-          </h1>
-          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-            Audit-grade reporting distinguishing observed facts, risk analysis, and cryptographic evidence.
-          </p>
+    <div className="wb-panel" style={{ height: '100%' }}>
+      {/* Panel Header */}
+      <div className="wb-panel-header">
+        <div className="wb-panel-title">
+          <FileText size={14} color="var(--accent)" />
+          <span>Defensive Security Assessment Report & Audit Package</span>
+          {isDemoMode && <DemoBadge />}
         </div>
 
-        {/* Action Buttons */}
-        <div style={{ display: 'flex', gap: '10px' }}>
+        <div style={{ display: 'flex', gap: '6px' }}>
           <button
             onClick={fetchReport}
-            disabled={loading}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '8px 14px',
-              borderRadius: '6px',
-              backgroundColor: 'var(--bg-surface-elevated)',
-              border: '1px solid var(--border-default)',
-              color: 'var(--text-primary)',
-              fontSize: '12px',
-              fontWeight: 600,
-            }}
+            className="wb-btn wb-btn-sm"
+            title="Re-generate report with newest findings and executions"
           >
-            <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh
+            <RefreshCw size={10} />
+            Refresh
           </button>
-
           <button
             onClick={handleDownloadMarkdown}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '8px 14px',
-              borderRadius: '6px',
-              backgroundColor: 'var(--bg-surface-elevated)',
-              border: '1px solid var(--border-default)',
-              color: 'var(--text-primary)',
-              fontSize: '12px',
-              fontWeight: 600,
-            }}
+            disabled={!reportMarkdown}
+            className="wb-btn wb-btn-sm"
+            title="Export standalone markdown file"
           >
-            <Download size={14} /> Download Markdown (.md)
+            <Download size={10} />
+            Download Markdown (.md)
           </button>
-
           <button
             onClick={handlePrintHtml}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '8px 16px',
-              borderRadius: '6px',
-              backgroundColor: 'var(--accent)',
-              color: '#090d16',
-              fontSize: '12px',
-              fontWeight: 600,
-            }}
+            disabled={!reportMarkdown}
+            className="wb-btn wb-btn-primary wb-btn-sm"
+            title="Open printable HTML version"
           >
-            <Printer size={14} /> Printable HTML
+            <Printer size={10} />
+            Printable HTML
           </button>
         </div>
       </div>
 
-      {/* Report Info Banner */}
-      <div
-        style={{
-          padding: '14px 18px',
-          borderRadius: '8px',
-          backgroundColor: 'var(--bg-surface)',
-          border: '1px solid var(--border-subtle)',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          fontSize: '13px',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <CheckCircle2 size={16} color="var(--status-pass-text)" />
-          <span style={{ color: 'var(--text-primary)' }}>
-            Report Ready for Assessment: <strong>{assessmentId}</strong>
-          </span>
-        </div>
-        <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>
-          Format: Standalone Markdown / Print-Optimized HTML
+      {/* Toolbar & Meta */}
+      <div className="wb-toolbar">
+        <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+          Assessment: <strong style={{ color: 'var(--text-primary)' }}>{assessmentId}</strong>
         </span>
+        <span style={{ color: 'var(--border-strong)' }}>|</span>
+        <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+          Format: <strong style={{ color: 'var(--text-primary)' }}>Audit-Grade Markdown / HTML</strong>
+        </span>
+        <span style={{ color: 'var(--border-strong)' }}>|</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: 'var(--status-warn-text)' }}>
+          <AlertCircle size={11} />
+          <span>In-memory session repository: export report before stopping backend.</span>
+        </div>
       </div>
 
-      {/* Report Preview Document */}
-      <div
-        style={{
-          backgroundColor: 'var(--bg-surface)',
-          borderRadius: '8px',
-          border: '1px solid var(--border-default)',
-          padding: '32px 40px',
-          boxShadow: '0 4px 20px rgba(0, 0, 0, 0.25)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '12px' }}>
-          <FileText size={18} color="var(--accent)" />
-          <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-            Report Document Preview
-          </span>
-        </div>
-
-        <pre
+      {/* Report Document Preview Pane */}
+      <div className="wb-panel-body" style={{ padding: '24px 32px' }}>
+        <div
           style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: '13px',
-            color: 'var(--text-primary)',
-            lineHeight: 1.7,
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
+            maxWidth: '900px',
+            margin: '0 auto',
+            background: 'var(--bg-table-zebra)',
+            border: '1px solid var(--border-default)',
+            borderRadius: '4px',
+            padding: '24px 32px',
+            boxShadow: '0 4px 16px rgba(0, 0, 0, 0.3)',
           }}
         >
-          {reportMarkdown}
-        </pre>
+          <pre
+            style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: '11px',
+              color: 'var(--text-primary)',
+              lineHeight: 1.7,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            }}
+          >
+            {reportMarkdown}
+          </pre>
+        </div>
       </div>
     </div>
   );

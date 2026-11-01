@@ -1,0 +1,655 @@
+/* ==========================================================================
+   Burp Suite Professional Inspired Defensive Security Workbench Styles
+   ========================================================================== */
+
+/* App Shell Layout */
+.wb-shell {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background-color: var(--bg-canvas);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.4;
+  user-select: none;
+}
+
+/* Demo Banner */
+.wb-demo-banner {
+  background: var(--demo-banner-bg);
+  border-bottom: 1px solid var(--demo-banner-border);
+  color: var(--demo-banner-text);
+  padding: 4px 16px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  z-index: 100;
+}
+
+.wb-demo-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wb-demo-badge {
+  background: #ff9800;
+  color: #1a1000;
+  font-size: 10px;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 2px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* Top Menu / Brand Bar */
+.wb-topbar {
+  height: var(--topbar-height);
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  flex-shrink: 0;
+}
+
+.wb-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 13px;
+  color: var(--text-primary);
+  letter-spacing: 0.02em;
+}
+
+.wb-brand-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--bg-surface-elevated);
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--border-default);
+}
+
+.wb-topbar-center {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.wb-engagement-pill {
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-default);
+  padding: 3px 8px;
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.wb-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Top Tab Bar (Burp Suite Style) */
+.wb-tabbar {
+  height: var(--tabbar-height);
+  background: var(--bg-surface-elevated);
+  border-bottom: 1px solid var(--border-default);
+  display: flex;
+  align-items: flex-end;
+  padding: 0 8px;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.wb-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-bottom: none;
+  border-top-left-radius: 4px;
+  border-top-right-radius: 4px;
+  cursor: pointer;
+  transition: background 0.1s ease, color 0.1s ease;
+  height: 28px;
+}
+
+.wb-tab:hover {
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
+}
+
+.wb-tab.active {
+  background: var(--bg-canvas);
+  color: var(--accent);
+  border-color: var(--border-default);
+  border-bottom: 1px solid var(--bg-canvas);
+  margin-bottom: -1px;
+  z-index: 2;
+  font-weight: 700;
+}
+
+/* Main Workspace */
+.wb-workspace {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.wb-page-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Status Bar */
+.wb-statusbar {
+  height: var(--statusbar-height);
+  background: var(--bg-panel-header);
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.wb-statusbar-group {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.wb-statusbar-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wb-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.wb-status-dot.active {
+  background: var(--status-pass-text);
+  box-shadow: 0 0 6px rgba(62, 196, 135, 0.6);
+}
+
+.wb-status-dot.blocked {
+  background: var(--status-blocked-text);
+  box-shadow: 0 0 6px rgba(255, 82, 119, 0.6);
+}
+
+.wb-status-dot.warning {
+  background: var(--status-warn-text);
+  box-shadow: 0 0 6px rgba(232, 168, 56, 0.6);
+}
+
+.wb-status-dot.neutral {
+  background: var(--text-muted);
+}
+
+/* Panels & Grids */
+.wb-panel {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  overflow: hidden;
+  height: 100%;
+}
+
+.wb-panel-header {
+  height: 32px;
+  background: var(--bg-panel-header);
+  border-bottom: 1px solid var(--border-default);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 10px;
+  flex-shrink: 0;
+}
+
+.wb-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.01em;
+}
+
+.wb-panel-count {
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  background: var(--bg-surface-elevated);
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+}
+
+.wb-panel-body {
+  flex: 1;
+  overflow: auto;
+  position: relative;
+}
+
+/* Split Grids */
+.wb-quad-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 1px;
+  background: var(--border-subtle);
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.wb-split-h {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 1px;
+  background: var(--border-subtle);
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.wb-split-v {
+  display: grid;
+  grid-template-rows: 1fr 1.2fr;
+  gap: 1px;
+  background: var(--border-subtle);
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Workbench Toolbar */
+.wb-toolbar {
+  background: var(--bg-surface-elevated);
+  border-bottom: 1px solid var(--border-default);
+  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.wb-toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Desktop Action Buttons */
+.wb-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 3px;
+  background: var(--bg-surface-elevated);
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.1s ease;
+  white-space: nowrap;
+}
+
+.wb-btn:hover:not(:disabled) {
+  background: var(--bg-surface-hover);
+  border-color: var(--border-strong);
+}
+
+.wb-btn:active:not(:disabled) {
+  background: var(--bg-surface-active);
+}
+
+.wb-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.wb-btn-primary {
+  background: var(--accent);
+  border-color: var(--accent-hover);
+  color: #ffffff;
+}
+
+.wb-btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: #ffffff;
+}
+
+.wb-btn-danger {
+  background: var(--status-fail-bg);
+  border-color: var(--status-fail-border);
+  color: var(--status-fail-text);
+}
+
+.wb-btn-danger:hover:not(:disabled) {
+  background: rgba(240, 106, 106, 0.25);
+  border-color: var(--status-fail-text);
+}
+
+.wb-btn-warning {
+  background: var(--status-warn-bg);
+  border-color: var(--status-warn-border);
+  color: var(--status-warn-text);
+}
+
+.wb-btn-warning:hover:not(:disabled) {
+  background: rgba(232, 168, 56, 0.25);
+  border-color: var(--status-warn-text);
+}
+
+.wb-btn-success {
+  background: var(--status-pass-bg);
+  border-color: var(--status-pass-border);
+  color: var(--status-pass-text);
+}
+
+.wb-btn-sm {
+  padding: 2px 7px;
+  font-size: 10px;
+}
+
+/* Forms & Inputs */
+.wb-input,
+.wb-select,
+.wb-textarea {
+  background: var(--bg-table-zebra);
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 3px;
+  outline: none;
+  font-family: inherit;
+}
+
+.wb-input:focus,
+.wb-select:focus,
+.wb-textarea:focus {
+  border-color: var(--border-focus);
+}
+
+.wb-input.font-mono,
+.wb-textarea.font-mono {
+  font-family: var(--font-mono);
+}
+
+/* Data Table (Burp Suite Issue Activity & Event Log style) */
+.wb-table-container {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  position: relative;
+}
+
+.wb-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  text-align: left;
+}
+
+.wb-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg-table-header);
+}
+
+.wb-table th {
+  padding: 6px 10px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-default);
+  border-right: 1px solid var(--border-subtle);
+  white-space: nowrap;
+}
+
+.wb-table th:last-child {
+  border-right: none;
+}
+
+.wb-table td {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border-subtle);
+  border-right: 1px solid var(--border-subtle);
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+.wb-table td:last-child {
+  border-right: none;
+}
+
+.wb-table tbody tr {
+  background: var(--bg-table-row);
+  cursor: pointer;
+  transition: background 0.05s ease;
+}
+
+.wb-table tbody tr:nth-child(even) {
+  background: var(--bg-table-zebra);
+}
+
+.wb-table tbody tr:hover {
+  background: var(--bg-table-hover);
+}
+
+.wb-table tbody tr.selected {
+  background: var(--bg-table-selected) !important;
+  color: #ffffff;
+}
+
+.wb-table tbody tr.interactive:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  z-index: 2;
+  position: relative;
+}
+
+/* Accessible Keyboard Focus Indicators */
+.wb-btn:focus-visible,
+.wb-tab:focus-visible,
+.wb-input:focus-visible,
+.wb-select:focus-visible,
+.wb-filter-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Sub Tabs Inside Detail Panels */
+.wb-subtabs {
+  display: flex;
+  align-items: center;
+  background: var(--bg-panel-header);
+  border-bottom: 1px solid var(--border-default);
+  padding: 0 8px;
+  gap: 2px;
+}
+
+.wb-subtab {
+  padding: 6px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+}
+
+.wb-subtab:hover {
+  color: var(--text-primary);
+}
+
+.wb-subtab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 700;
+}
+
+/* Badges */
+.wb-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* Key Value Grid */
+.wb-kv-grid {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  font-size: 11px;
+  border: 1px solid var(--border-subtle);
+}
+
+.wb-kv-key {
+  padding: 6px 10px;
+  background: var(--bg-panel-header);
+  border-bottom: 1px solid var(--border-subtle);
+  border-right: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.wb-kv-val {
+  padding: 6px 10px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  word-break: break-all;
+}
+
+/* State Panel (Empty, Loading, Offline, Error) */
+.wb-state-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  text-align: center;
+  height: 100%;
+  color: var(--text-secondary);
+  gap: 10px;
+}
+
+.wb-state-icon {
+  color: var(--text-muted);
+}
+
+.wb-state-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.wb-state-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+  max-width: 360px;
+  line-height: 1.5;
+}
+
+/* Modal Overlay */
+.wb-modal-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(8, 10, 14, 0.75);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.wb-modal {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  width: 90%;
+  max-width: 520px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.wb-modal-header {
+  height: 36px;
+  background: var(--bg-panel-header);
+  border-bottom: 1px solid var(--border-default);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 14px;
+}
+
+.wb-modal-body {
+  padding: 16px;
+  font-size: 12px;
+  color: var(--text-primary);
+  line-height: 1.5;
+}
+
+.wb-modal-footer {
+  background: var(--bg-surface-elevated);
+  border-top: 1px solid var(--border-default);
+  padding: 10px 14px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

@@ -1,324 +1,544 @@
-import React from 'react';
-import { Target, CheckCircle2, ShieldAlert, AlertTriangle, ArrowRight, ShieldCheck, Globe, Lock, Cpu, Network, KeyRound } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import {
+  PlayCircle,
+  AlertTriangle,
+  FileText,
+  Target,
+  RefreshCw,
+  ExternalLink,
+} from 'lucide-react';
+import {
+  api,
+  Finding,
+  CheckExecutionRecord,
+  SecurityRuleMetadata,
+  ScopeItem,
+} from '@/services/api';
+import {
+  DEMO_FINDINGS,
+  DEMO_CHECK_EXECUTIONS,
+  DEMO_RULES,
+  DEMO_SCOPE_ITEMS,
+} from '@/demo/fixtures';
+import { DataTable, DataTableColumn } from '@/components/DataTable';
+import { SeverityBadge } from '@/components/SeverityBadge';
 import { StatusBadge } from '@/components/StatusBadge';
+import { StatePanel } from '@/components/StatePanel';
+import { DemoBadge } from '@/components/DemoBadge';
+import { DetailPanel, DetailTab } from '@/components/DetailPanel';
+import { KeyValue } from '@/components/KeyValue';
+import { ActiveTab } from '@/components/AppShell';
 
 interface DashboardPageProps {
-  onNavigateToScope: () => void;
-  onNavigateToExecutions: () => void;
+  isDemoMode: boolean;
+  onNavigateTab: (tab: ActiveTab) => void;
 }
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({
-  onNavigateToScope,
-  onNavigateToExecutions,
+  isDemoMode,
+  onNavigateTab,
 }) => {
-  // Sample workbench state representing local laboratory
-  const metrics = [
-    { title: 'Active Assessments', value: '2', subtitle: 'Web & Infrastructure', icon: CheckCircle2, color: 'var(--status-pass-text)' },
-    { title: 'Defensive Security Tools', value: '11 Active', subtitle: 'Web, TLS, DNS, Net, Crypto, Auth', icon: Target, color: 'var(--accent)' },
-    { title: 'Scope Blocks Prevented', value: '14', subtitle: 'Default-deny triggered', icon: ShieldAlert, color: 'var(--status-blocked-text)' },
-    { title: 'Findings Pending Review', value: '3', subtitle: '1 High, 2 Medium', icon: AlertTriangle, color: 'var(--sev-high-text)' },
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [rules, setRules] = useState<SecurityRuleMetadata[]>([]);
+  const [findings, setFindings] = useState<Finding[]>([]);
+  const [executions, setExecutions] = useState<CheckExecutionRecord[]>([]);
+  const [scopeItems, setScopeItems] = useState<ScopeItem[]>([]);
+  const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null);
+
+  const loadData = async () => {
+    setLoading(true);
+    setError(null);
+
+    if (isDemoMode) {
+      // Load strictly from demo fixtures
+      setRules(DEMO_RULES);
+      setFindings(DEMO_FINDINGS);
+      setExecutions(DEMO_CHECK_EXECUTIONS);
+      setScopeItems(DEMO_SCOPE_ITEMS);
+      setSelectedFinding(DEMO_FINDINGS[0] || null);
+      setLoading(false);
+      return;
+    }
+
+    try {
+      // In Live Mode: strictly call real backend APIs
+      const [rulesRes, findingsRes, execsRes, scopeRes] = await Promise.all([
+        api.getRules().catch(() => []),
+        api.getFindings().catch(() => []),
+        api.getExecutions().catch(() => []),
+        api.getScopeItems().catch(() => []),
+      ]);
+
+      setRules(rulesRes);
+      setFindings(findingsRes);
+      setExecutions(execsRes);
+      setScopeItems(scopeRes);
+      setSelectedFinding(findingsRes.length > 0 ? findingsRes[0] : null);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to fetch operational data from backend');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+  }, [isDemoMode]);
+
+  // If loading in live mode
+  if (loading && !isDemoMode) {
+    return <StatePanel kind="loading" title="Connecting to Workbench API..." />;
+  }
+
+  // If live mode failed
+  if (error && !isDemoMode) {
+    return (
+      <StatePanel
+        kind="offline"
+        title="Workbench Backend Offline"
+        description="Could not load dashboard telemetry from local API. Ensure the backend is running at http://127.0.0.1:8000."
+        errorMessage={error}
+        onRetry={loadData}
+      />
+    );
+  }
+
+  // Issue Activity Columns (Burp Suite Style)
+  const findingColumns: DataTableColumn<Finding>[] = [
+    {
+      key: 'severity',
+      label: 'Severity',
+      width: '100px',
+      render: (row) => <SeverityBadge severity={row.severity} size="sm" />,
+    },
+    {
+      key: 'title',
+      label: 'Issue Type / Title',
+      render: (row) => (
+        <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+          {row.title}
+        </span>
+      ),
+    },
+    {
+      key: 'ruleId',
+      label: 'Rule',
+      width: '110px',
+      render: (row) => (
+        <code style={{ color: 'var(--accent)', fontSize: '11px' }}>
+          {row.ruleId || '—'}
+        </code>
+      ),
+    },
+    {
+      key: 'status',
+      label: 'Status',
+      width: '110px',
+      render: (row) => <StatusBadge status={row.status} size="sm" />,
+    },
+    {
+      key: 'assetId',
+      label: 'Asset',
+      width: '100px',
+      render: (row) => (
+        <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
+          {row.assetId}
+        </span>
+      ),
+    },
   ];
 
-  const securityTools = [
-    { id: 'SEC-WEB-001', name: 'HTTP Security Headers', category: 'Web', icon: Globe, desc: 'Validates HSTS, CSP, X-Frame-Options & anti-sniffing directives' },
-    { id: 'SEC-WEB-002', name: 'Cookie Security Flags', category: 'Web', icon: Globe, desc: 'Audits Secure, HttpOnly, and SameSite protection flags' },
-    { id: 'SEC-WEB-003', name: 'Tech Stack Disclosure', category: 'Web', icon: Globe, desc: 'Detects Server, X-Powered-By, and framework banner leaks' },
-    { id: 'SEC-WEB-004', name: 'CORS Policy Auditor', category: 'Web', icon: Globe, desc: 'Flags wildcard origins with credentials & insecure headers' },
-    { id: 'SEC-WEB-005', name: 'Sensitive File Exposure', category: 'Web', icon: Globe, desc: 'Probes .git, .env, and RFC 9116 security.txt posture' },
-    { id: 'SEC-TLS-001', name: 'TLS & Cipher Check', category: 'Transport', icon: Lock, desc: 'Verifies certificate validity, SANs, and SSL/TLS deprecation' },
-    { id: 'SEC-NET-001', name: 'Authorized Port Exposure', category: 'Network', icon: Network, desc: 'Audits accessible TCP ports against authorized profiles' },
-    { id: 'SEC-DNS-001', name: 'DNS SPF & DMARC Posture', category: 'DNS', icon: ShieldCheck, desc: 'Evaluates anti-spoofing policies and mailbox authentication' },
-    { id: 'SEC-DNS-002', name: 'DNS CAA Record Check', category: 'DNS', icon: ShieldCheck, desc: 'Ensures authorized Certificate Authorities are pinned' },
-    { id: 'SEC-CRYPTO-001', name: 'Crypto Hash Strength', category: 'Crypto', icon: Cpu, desc: 'Identifies broken algorithms (MD5, SHA1) vs modern standards' },
-    { id: 'SEC-AUTH-001', name: 'Password Policy & Entropy', category: 'Identity', icon: KeyRound, desc: 'NIST SP 800-63B Shannon entropy & dictionary audit' },
-  ];
-
-  const recentExecutions = [
-    { id: 'CHK-9a2c1b', ruleId: 'SEC-WEB-001', target: 'app.lab.local', scopeDecision: 'ALLOW', status: 'PASS', time: '2 mins ago' },
-    { id: 'CHK-8f4d2e', ruleId: 'SEC-TLS-001', target: '192.168.1.100:443', scopeDecision: 'ALLOW', status: 'WARN', time: '14 mins ago' },
-    { id: 'CHK-7b1a99', ruleId: 'SEC-NET-001', target: 'external-site.com', scopeDecision: 'BLOCK', status: 'BLOCKED_OUT_OF_SCOPE', time: '28 mins ago' },
-    { id: 'CHK-6c2e4f', ruleId: 'SEC-DNS-001', target: 'ns1.lab.local', scopeDecision: 'ALLOW', status: 'PASS', time: '1 hour ago' },
-    { id: 'CHK-5d1f88', ruleId: 'SEC-AUTH-001', target: 'AdminPassword!2026', scopeDecision: 'ALLOW', status: 'PASS', time: '1.5 hours ago' },
-  ];
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
-      {/* Top Banner / Core Flow */}
-      <div
-        style={{
-          padding: '20px 24px',
-          borderRadius: '8px',
-          backgroundColor: 'var(--bg-surface)',
-          border: '1px solid var(--border-default)',
-        }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-          <div>
-            <h1 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)' }}>
-              Practical Defensive Security Workbench
-            </h1>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-              Authorized assessment workflow under strict Scope Guard enforcement.
-            </p>
-          </div>
-          <button
-            onClick={onNavigateToScope}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '8px 14px',
-              backgroundColor: 'var(--accent-muted)',
-              border: '1px solid var(--accent)',
-              borderRadius: '6px',
-              color: 'var(--accent)',
-              fontSize: '12px',
-              fontWeight: 600,
-            }}
-          >
-            Manage Scope <ArrowRight size={14} />
-          </button>
-        </div>
-
-        {/* Workflow breadcrumbs */}
-        <div
+  // Event Log Columns (Recent executions)
+  const executionColumns: DataTableColumn<CheckExecutionRecord>[] = [
+    {
+      key: 'executedAt',
+      label: 'Time',
+      width: '120px',
+      render: (row) => (
+        <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+          {new Date(row.executedAt).toLocaleTimeString()}
+        </span>
+      ),
+    },
+    {
+      key: 'id',
+      label: 'Execution ID',
+      width: '110px',
+      render: (row) => (
+        <code style={{ color: 'var(--text-primary)' }}>{row.id}</code>
+      ),
+    },
+    {
+      key: 'ruleId',
+      label: 'Module',
+      width: '110px',
+      render: (row) => (
+        <code style={{ color: 'var(--accent)' }}>{row.ruleId}</code>
+      ),
+    },
+    {
+      key: 'target',
+      label: 'Target',
+      render: (row) => (
+        <span style={{ fontFamily: 'var(--font-mono)' }}>{row.target}</span>
+      ),
+    },
+    {
+      key: 'scopeDecision',
+      label: 'Scope Guard',
+      width: '95px',
+      render: (row) => (
+        <span
+          className="wb-chip"
           style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            fontSize: '11px',
-            color: 'var(--text-muted)',
-            fontFamily: 'var(--font-mono)',
-            overflowX: 'auto',
-            paddingTop: '6px',
+            background:
+              row.scopeDecision === 'ALLOW'
+                ? 'var(--status-pass-bg)'
+                : 'var(--status-blocked-bg)',
+            color:
+              row.scopeDecision === 'ALLOW'
+                ? 'var(--status-pass-text)'
+                : 'var(--status-blocked-text)',
+            border: `1px solid ${
+              row.scopeDecision === 'ALLOW'
+                ? 'var(--status-pass-border)'
+                : 'var(--status-blocked-border)'
+            }`,
           }}
         >
-          <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Engagement</span> →
-          <span style={{ color: 'var(--accent)', fontWeight: 600 }}>Scope</span> →
-          <span>Assets</span> →
-          <span>Assessment</span> →
-          <span>Checks</span> →
-          <span>Observation</span> →
-          <span>Finding</span> →
-          <span>Evidence</span> →
-          <span>Risk</span> →
-          <span>Remediation</span> →
-          <span>Retest</span> →
-          <span>Report</span>
-        </div>
-      </div>
+          {row.scopeDecision}
+        </span>
+      ),
+    },
+    {
+      key: 'status',
+      label: 'Status',
+      width: '100px',
+      render: (row) => <StatusBadge status={row.status} size="sm" />,
+    },
+  ];
 
-      {/* Metrics Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '16px' }}>
-        {metrics.map((m, idx) => {
-          const Icon = m.icon;
-          return (
-            <div
-              key={idx}
-              style={{
-                padding: '20px',
-                borderRadius: '8px',
-                backgroundColor: 'var(--bg-surface)',
-                border: '1px solid var(--border-subtle)',
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                <span style={{ fontSize: '13px', color: 'var(--text-secondary)', fontWeight: 500 }}>{m.title}</span>
-                <Icon size={18} color={m.color} />
+  // Advisory tabs for selected finding
+  const inspectorTabs: DetailTab[] = selectedFinding
+    ? [
+        {
+          id: 'advisory',
+          label: 'Advisory',
+          content: (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <h3
+                  style={{
+                    fontSize: '13px',
+                    fontWeight: 700,
+                    color: 'var(--text-primary)',
+                    marginBottom: '4px',
+                  }}
+                >
+                  {selectedFinding.title}
+                </h3>
+                <div style={{ display: 'flex', gap: '10px', fontSize: '11px', color: 'var(--text-secondary)' }}>
+                  <span>Severity: <strong style={{ color: 'var(--text-primary)' }}>{selectedFinding.severity.toUpperCase()}</strong></span>
+                  <span>Confidence: <strong style={{ color: 'var(--text-primary)' }}>{selectedFinding.confidence.toUpperCase()}</strong></span>
+                  {selectedFinding.cwe && <span>CWE: <code style={{ color: 'var(--accent)' }}>{selectedFinding.cwe}</code></span>}
+                </div>
               </div>
-              <div style={{ fontSize: '26px', fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>
-                {m.value}
+
+              <div>
+                <div
+                  style={{
+                    fontSize: '10px',
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                    color: 'var(--text-muted)',
+                    marginBottom: '4px',
+                  }}
+                >
+                  Issue Detail & Context
+                </div>
+                <div style={{ fontSize: '12px', color: 'var(--text-primary)', lineHeight: 1.5 }}>
+                  {selectedFinding.description || 'No detailed description provided.'}
+                </div>
               </div>
-              <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                {m.subtitle}
-              </div>
+
+              {selectedFinding.impact && (
+                <div>
+                  <div
+                    style={{
+                      fontSize: '10px',
+                      fontWeight: 700,
+                      textTransform: 'uppercase',
+                      color: 'var(--sev-high-text)',
+                      marginBottom: '4px',
+                    }}
+                  >
+                    Technical Impact
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-primary)', lineHeight: 1.5 }}>
+                    {selectedFinding.impact}
+                  </div>
+                </div>
+              )}
             </div>
-          );
-        })}
-      </div>
+          ),
+        },
+        {
+          id: 'remediation',
+          label: 'Remediation',
+          content: (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div
+                style={{
+                  fontSize: '10px',
+                  fontWeight: 700,
+                  textTransform: 'uppercase',
+                  color: 'var(--accent)',
+                }}
+              >
+                Defensive Guidance
+              </div>
+              <pre
+                style={{
+                  fontSize: '11px',
+                  fontFamily: 'inherit',
+                  color: 'var(--text-primary)',
+                  lineHeight: 1.6,
+                  whiteSpace: 'pre-wrap',
+                }}
+              >
+                {selectedFinding.recommendation || 'No remediation guidance recorded.'}
+              </pre>
+            </div>
+          ),
+        },
+        {
+          id: 'metadata',
+          label: 'Metadata',
+          content: (
+            <KeyValue
+              items={[
+                { key: 'Finding ID', value: selectedFinding.id },
+                { key: 'Assessment ID', value: selectedFinding.assessmentId },
+                { key: 'Asset ID', value: selectedFinding.assetId },
+                { key: 'Rule ID', value: selectedFinding.ruleId || '—' },
+                { key: 'Classification', value: selectedFinding.cwe || 'None' },
+                { key: 'Status', value: selectedFinding.status },
+                {
+                  key: 'Discovered At',
+                  value: new Date(selectedFinding.createdAt).toUTCString(),
+                },
+              ]}
+            />
+          ),
+        },
+      ]
+    : [
+        {
+          id: 'none',
+          label: 'Advisory',
+          content: (
+            <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}>
+              Select an issue from Issue Activity to view defensive advisory details.
+            </div>
+          ),
+        },
+      ];
 
-      {/* Defensive Tool Catalog Grid */}
-      <div
-        style={{
-          borderRadius: '8px',
-          backgroundColor: 'var(--bg-surface)',
-          border: '1px solid var(--border-subtle)',
-          padding: '20px 24px',
-        }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-          <div>
-            <h2 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>
-              Defensive Security Tools Catalog ({securityTools.length} Modules)
-            </h2>
-            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-              Standardized defensive analyzers aligned with OWASP ASVS, NIST SP 800-63B, and CIS benchmarks.
-            </p>
+  const inScopeCount = scopeItems.filter((s) => s.inScope).length;
+  const excludedCount = scopeItems.filter((s) => !s.inScope).length;
+  const blockedExecCount = executions.filter((e) => e.scopeDecision === 'BLOCK').length;
+
+  return (
+    <div className="wb-quad-grid">
+      {/* =========================================================================
+          Quadrant 1 (Top Left): Tasks & Defensive Modules
+          ========================================================================= */}
+      <div className="wb-panel">
+        <div className="wb-panel-header">
+          <div className="wb-panel-title">
+            <PlayCircle size={14} color="var(--accent)" />
+            <span>Defensive Security Modules & Scope Guard</span>
+            {isDemoMode && <DemoBadge />}
           </div>
-          <button
-            onClick={onNavigateToExecutions}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '6px 12px',
-              backgroundColor: 'var(--bg-surface-elevated)',
-              border: '1px solid var(--border-default)',
-              borderRadius: '6px',
-              color: 'var(--text-primary)',
-              fontSize: '12px',
-              fontWeight: 500,
-            }}
-          >
-            Launch in Workbench <ArrowRight size={14} />
-          </button>
+          <div style={{ display: 'flex', gap: '6px' }}>
+            <button
+              onClick={() => onNavigateTab('executions')}
+              className="wb-btn wb-btn-primary wb-btn-sm"
+              title="Launch check execution wizard"
+            >
+              <PlayCircle size={12} />
+              Execute Check
+            </button>
+            <button
+              onClick={() => onNavigateTab('scope')}
+              className="wb-btn wb-btn-sm"
+              title="Configure authorized target scope"
+            >
+              <Target size={12} />
+              Scope
+            </button>
+          </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '12px' }}>
-          {securityTools.map((tool) => {
-            const Icon = tool.icon;
-            return (
+        <div className="wb-toolbar">
+          <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+            Modules: <strong style={{ color: 'var(--text-primary)' }}>{rules.length} Active</strong>
+          </span>
+          <span style={{ color: 'var(--border-strong)' }}>|</span>
+          <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+            Scope Rules: <strong style={{ color: 'var(--status-pass-text)' }}>{inScopeCount} In-Scope</strong> /{' '}
+            <strong style={{ color: 'var(--status-blocked-text)' }}>{excludedCount} Excluded</strong>
+          </span>
+          <span style={{ color: 'var(--border-strong)' }}>|</span>
+          <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+            Blocks: <strong style={{ color: 'var(--status-blocked-text)' }}>{blockedExecCount} Prevented</strong>
+          </span>
+        </div>
+
+        <div className="wb-panel-body">
+          <div style={{ padding: '8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {rules.map((rule) => (
               <div
-                key={tool.id}
-                onClick={onNavigateToExecutions}
+                key={rule.ruleId}
+                onClick={() => onNavigateTab('executions')}
                 style={{
-                  padding: '14px 16px',
-                  borderRadius: '6px',
-                  backgroundColor: 'var(--bg-canvas)',
+                  padding: '7px 10px',
+                  background: 'var(--bg-table-zebra)',
                   border: '1px solid var(--border-subtle)',
+                  borderRadius: '3px',
                   cursor: 'pointer',
                   display: 'flex',
-                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
                   gap: '8px',
                 }}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                  <code style={{ color: 'var(--accent)', fontWeight: 700, fontSize: '11px' }}>
+                    {rule.ruleId}
+                  </code>
                   <span
                     style={{
-                      fontFamily: 'var(--font-mono)',
                       fontSize: '11px',
-                      fontWeight: 700,
-                      color: 'var(--accent)',
+                      color: 'var(--text-primary)',
+                      fontWeight: 600,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
                     }}
                   >
-                    {tool.id}
+                    {rule.title}
                   </span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
                   <span
                     style={{
                       fontSize: '10px',
-                      padding: '2px 6px',
-                      borderRadius: '4px',
-                      backgroundColor: 'var(--bg-surface-elevated)',
-                      color: 'var(--text-secondary)',
-                      fontWeight: 500,
+                      color: 'var(--text-muted)',
+                      fontFamily: 'var(--font-mono)',
                     }}
                   >
-                    {tool.category}
+                    {rule.cwe}
+                  </span>
+                  <span className="wb-chip" style={{ background: 'var(--bg-surface-elevated)' }}>
+                    {rule.category}
                   </span>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Icon size={16} color="var(--text-primary)" />
-                  <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
-                    {tool.name}
-                  </div>
-                </div>
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)', lineHeight: '1.4' }}>
-                  {tool.desc}
-                </div>
               </div>
-            );
-          })}
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* Recent Executions Table */}
-      <div
-        style={{
-          borderRadius: '8px',
-          backgroundColor: 'var(--bg-surface)',
-          border: '1px solid var(--border-subtle)',
-          overflow: 'hidden',
-        }}
-      >
-        <div
-          style={{
-            padding: '16px 20px',
-            borderBottom: '1px solid var(--border-subtle)',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-          }}
-        >
-          <div>
-            <h2 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>
-              Recent Check Executions & Scope Decisions
-            </h2>
-            <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-              Every check is validated against Scope Guard before target execution.
-            </p>
+      {/* =========================================================================
+          Quadrant 2 (Top Right): Issue Activity (Findings Table)
+          ========================================================================= */}
+      <div className="wb-panel">
+        <div className="wb-panel-header">
+          <div className="wb-panel-title">
+            <AlertTriangle size={14} color="var(--sev-high-text)" />
+            <span>Issue Activity</span>
+            <span className="wb-panel-count">{findings.length}</span>
+            {isDemoMode && <DemoBadge />}
           </div>
           <button
-            onClick={onNavigateToExecutions}
-            style={{
-              fontSize: '12px',
-              color: 'var(--accent)',
-              fontWeight: 600,
-            }}
+            onClick={() => onNavigateTab('findings')}
+            className="wb-btn wb-btn-sm"
+            title="Open comprehensive findings & evidence review"
           >
-            View All Executions
+            <span>View All</span>
+            <ExternalLink size={10} />
           </button>
         </div>
 
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
-            <thead>
-              <tr style={{ backgroundColor: 'var(--bg-surface-elevated)', color: 'var(--text-secondary)', borderBottom: '1px solid var(--border-subtle)' }}>
-                <th style={{ padding: '12px 20px', fontWeight: 600 }}>Execution ID</th>
-                <th style={{ padding: '12px 20px', fontWeight: 600 }}>Rule</th>
-                <th style={{ padding: '12px 20px', fontWeight: 600 }}>Target</th>
-                <th style={{ padding: '12px 20px', fontWeight: 600 }}>Scope Decision</th>
-                <th style={{ padding: '12px 20px', fontWeight: 600 }}>Status</th>
-                <th style={{ padding: '12px 20px', fontWeight: 600 }}>Time</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentExecutions.map((row) => (
-                <tr key={row.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                  <td style={{ padding: '12px 20px', fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>
-                    {row.id}
-                  </td>
-                  <td style={{ padding: '12px 20px', fontFamily: 'var(--font-mono)', color: 'var(--accent)' }}>
-                    {row.ruleId}
-                  </td>
-                  <td style={{ padding: '12px 20px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
-                    {row.target}
-                  </td>
-                  <td style={{ padding: '12px 20px' }}>
-                    <span
-                      style={{
-                        padding: '2px 8px',
-                        borderRadius: '4px',
-                        fontSize: '11px',
-                        fontWeight: 700,
-                        fontFamily: 'var(--font-mono)',
-                        backgroundColor: row.scopeDecision === 'ALLOW' ? 'var(--status-pass-bg)' : 'var(--status-blocked-bg)',
-                        color: row.scopeDecision === 'ALLOW' ? 'var(--status-pass-text)' : 'var(--status-blocked-text)',
-                      }}
-                    >
-                      {row.scopeDecision}
-                    </span>
-                  </td>
-                  <td style={{ padding: '12px 20px' }}>
-                    <StatusBadge status={row.status} size="sm" />
-                  </td>
-                  <td style={{ padding: '12px 20px', color: 'var(--text-muted)', fontSize: '12px' }}>
-                    {row.time}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="wb-panel-body">
+          <DataTable
+            columns={findingColumns}
+            data={findings}
+            keyExtractor={(row) => row.id}
+            selectedId={selectedFinding?.id}
+            onSelectRow={(row) => setSelectedFinding(row)}
+            emptyMessage="No vulnerability findings recorded. Run defensive checks against authorized targets."
+          />
         </div>
+      </div>
+
+      {/* =========================================================================
+          Quadrant 3 (Bottom Left): Event Log & Audit Trail
+          ========================================================================= */}
+      <div className="wb-panel">
+        <div className="wb-panel-header">
+          <div className="wb-panel-title">
+            <FileText size={14} color="var(--text-secondary)" />
+            <span>Event Log / Execution Trail</span>
+            <span className="wb-panel-count">{executions.length}</span>
+            {isDemoMode && <DemoBadge />}
+          </div>
+          <button
+            onClick={loadData}
+            className="wb-btn wb-btn-sm"
+            title="Refresh event log from backend"
+          >
+            <RefreshCw size={10} />
+            Refresh
+          </button>
+        </div>
+
+        <div className="wb-panel-body">
+          <DataTable
+            columns={executionColumns}
+            data={executions}
+            keyExtractor={(row) => row.id}
+            emptyMessage="No execution events logged in current session. Execute a check from the top-left panel."
+          />
+        </div>
+      </div>
+
+      {/* =========================================================================
+          Quadrant 4 (Bottom Right): Advisory / Detail Inspector
+          ========================================================================= */}
+      <div style={{ height: '100%', overflow: 'hidden' }}>
+        <DetailPanel
+          title={
+            selectedFinding
+              ? `Advisory Inspector: ${selectedFinding.id}`
+              : 'Advisory Inspector'
+          }
+          tabs={inspectorTabs}
+          actions={
+            selectedFinding && (
+              <button
+                onClick={() => onNavigateTab('findings')}
+                className="wb-btn wb-btn-sm"
+              >
+                <span>Full Evidence</span>
+                <ExternalLink size={10} />
+              </button>
+            )
+          }
+        />
       </div>
     </div>
   );

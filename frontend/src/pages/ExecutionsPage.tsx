@@ -1,352 +1,661 @@
-import React, { useState } from 'react';
-import { PlayCircle, ShieldCheck, ShieldAlert, AlertTriangle } from 'lucide-react';
-import { api, RunCheckResponse } from '@/services/api';
+import React, { useState, useEffect } from 'react';
+import {
+  PlayCircle,
+  ShieldCheck,
+  ShieldAlert,
+  AlertTriangle,
+  RefreshCw,
+  Terminal,
+} from 'lucide-react';
+import {
+  api,
+  CheckExecutionRecord,
+  SecurityRuleMetadata,
+  RunCheckResponse,
+} from '@/services/api';
+import { DEMO_CHECK_EXECUTIONS, DEMO_RULES } from '@/demo/fixtures';
+import { DataTable, DataTableColumn } from '@/components/DataTable';
 import { StatusBadge } from '@/components/StatusBadge';
 import { SeverityBadge } from '@/components/SeverityBadge';
+import { ConfirmDialog } from '@/components/ConfirmDialog';
+import { StatePanel } from '@/components/StatePanel';
+import { DemoBadge } from '@/components/DemoBadge';
+import { KeyValue } from '@/components/KeyValue';
 
-export const ExecutionsPage: React.FC = () => {
-  const [target, setTarget] = useState('app.lab.local');
-  const [ruleId, setRuleId] = useState('SEC-TLS-001');
-  const [running, setRunning] = useState(false);
+interface ExecutionsPageProps {
+  isDemoMode: boolean;
+}
+
+export const ExecutionsPage: React.FC<ExecutionsPageProps> = ({ isDemoMode }) => {
+  const [rules, setRules] = useState<SecurityRuleMetadata[]>([]);
+  const [executions, setExecutions] = useState<CheckExecutionRecord[]>([]);
+  const [selectedExec, setSelectedExec] = useState<CheckExecutionRecord | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Execution Form State
+  const [ruleId, setRuleId] = useState<string>('SEC-WEB-001');
+  const [target, setTarget] = useState<string>('app.lab.local');
+  const [running, setRunning] = useState<boolean>(false);
   const [lastResult, setLastResult] = useState<RunCheckResponse | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
+  const [showConfirmModal, setShowConfirmModal] = useState<boolean>(false);
 
-  const [history, setHistory] = useState([
-    { id: 'CHK-01', ruleId: 'SEC-WEB-001', target: 'app.lab.local', scopeDecision: 'ALLOW', status: 'PASS', time: '10:14:02 UTC', duration: '142ms' },
-    { id: 'CHK-02', ruleId: 'SEC-TLS-001', target: 'critical.lab.local', scopeDecision: 'BLOCK', status: 'BLOCKED_OUT_OF_SCOPE', time: '10:18:22 UTC', duration: '3ms' },
-    { id: 'CHK-03', ruleId: 'SEC-TLS-001', target: 'app.lab.local', scopeDecision: 'ALLOW', status: 'PASS', time: '10:22:45 UTC', duration: '89ms' },
-  ]);
+  const assessmentId = isDemoMode ? 'DEMO-ASM-001' : 'ASM-001';
 
-  const handleRunExecution = async (e: React.FormEvent) => {
+  const loadData = async () => {
+    setLoading(true);
+    setError(null);
+    setLastResult(null);
+    setRunError(null);
+    setSelectedExec(null);
+
+    if (isDemoMode) {
+      setRules(DEMO_RULES);
+      setExecutions(DEMO_CHECK_EXECUTIONS);
+      setSelectedExec(DEMO_CHECK_EXECUTIONS[0] || null);
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const [rulesRes, execsRes] = await Promise.all([
+        api.getRules().catch(() => []),
+        api.getExecutions().catch(() => []),
+      ]);
+
+      setRules(rulesRes);
+      setExecutions(execsRes);
+      setSelectedExec(execsRes.length > 0 ? execsRes[0] : null);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to load check execution telemetry from backend');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+  }, [isDemoMode]);
+
+  const selectedRuleMeta = rules.find((r) => r.ruleId === ruleId);
+
+  const getTargetPlaceholder = () => {
+    if (ruleId === 'SEC-CRYPTO-001') return 'e.g. 5d41402abc4b2a76b9719d911017c592 or SHA256 string';
+    if (ruleId === 'SEC-AUTH-001') return 'e.g. AdminPassword!2026';
+    if (ruleId === 'SEC-NET-001') return 'e.g. 192.168.1.50 or app.lab.local';
+    return 'e.g. app.lab.local, lab.local, 192.168.1.100';
+  };
+
+  const handleOpenConfirm = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!target.trim()) return;
+    setShowConfirmModal(true);
+  };
+
+  const handleExecuteCheck = async () => {
+    setShowConfirmModal(false);
     if (!target.trim()) return;
 
     setRunning(true);
-    try {
-      const res = await api.runCheck('ASM-001', ruleId, target.trim());
-      setLastResult(res);
-      setHistory([
-        {
-          id: res.executionRecord.id,
-          ruleId: res.executionRecord.ruleId,
-          target: res.executionRecord.target,
-          scopeDecision: res.executionRecord.scopeDecision,
-          status: res.executionRecord.status,
-          time: new Date().toLocaleTimeString() + ' UTC',
-          duration: `${res.executionRecord.durationMs || 45}ms`,
-        },
-        ...history,
-      ]);
-    } catch {
-      // Local fallback simulation if backend offline
+    setRunError(null);
+    setLastResult(null);
+
+    if (isDemoMode) {
+      // Offline deterministic simulation for demo fixtures
+      const cleanTarget = target.trim().toLowerCase();
       const isAllowed =
         ruleId === 'SEC-AUTH-001' ||
         ruleId === 'SEC-CRYPTO-001' ||
-        (target.includes('lab.local') && !target.includes('critical'));
-      const fallbackRecord: RunCheckResponse = {
+        (cleanTarget.includes('lab.local') && !cleanTarget.includes('database'));
+
+      const demoRecord: RunCheckResponse = {
         allowed: isAllowed,
         executionRecord: {
-          id: `CHK-${Math.floor(1000 + Math.random() * 9000)}`,
-          assessmentId: 'ASM-001',
+          id: `DEMO-CHK-${Math.floor(1000 + Math.random() * 9000)}`,
+          assessmentId,
           ruleId,
           target: target.trim(),
           scopeDecision: isAllowed ? 'ALLOW' : 'BLOCK',
           status: isAllowed ? 'PASS' : 'BLOCKED_OUT_OF_SCOPE',
-          durationMs: isAllowed ? 32 : 2,
+          durationMs: isAllowed ? 38 : 2,
+          errorCode: isAllowed ? undefined : 'SCOPE_VIOLATION',
+          errorMessage: isAllowed
+            ? undefined
+            : 'Target excluded by scope policy rule DEMO-SCP-003.',
           executedAt: new Date().toISOString(),
         },
         observation: isAllowed
           ? {
-              id: 'OBS-01',
-              summary: `Target ${target} complies with ${ruleId} security parameters.`,
+              id: 'DEMO-OBS-01',
+              summary: `Target ${target} passed defensive parameter validation for ${ruleId}.`,
               observedAt: new Date().toISOString(),
             }
           : undefined,
         message: isAllowed
           ? `Check ${ruleId} completed with status PASS.`
-          : `BLOCKED — OUT OF SCOPE\nTarget is not authorized under active scope policy.`,
+          : 'BLOCKED — OUT OF SCOPE. Target is not authorized under active scope policy.',
       };
-      setLastResult(fallbackRecord);
-      setHistory([
-        {
-          id: fallbackRecord.executionRecord.id,
-          ruleId,
-          target: target.trim(),
-          scopeDecision: fallbackRecord.executionRecord.scopeDecision,
-          status: fallbackRecord.executionRecord.status,
-          time: new Date().toLocaleTimeString() + ' UTC',
-          duration: '32ms',
-        },
-        ...history,
-      ]);
+
+      setLastResult(demoRecord);
+      setExecutions([demoRecord.executionRecord, ...executions]);
+      setSelectedExec(demoRecord.executionRecord);
+      setRunning(false);
+      return;
+    }
+
+    try {
+      const res = await api.runCheck(assessmentId, ruleId, target.trim());
+      setLastResult(res);
+      setExecutions([res.executionRecord, ...executions]);
+      setSelectedExec(res.executionRecord);
+    } catch (err: any) {
+      setRunError(err?.message || 'Check execution request failed on backend API');
     } finally {
       setRunning(false);
     }
   };
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '28px' }}>
-      {/* Header */}
-      <div>
-        <h1 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)' }}>
-          Security Check Executions & Scope Guard Pipeline
-        </h1>
-        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-          Execution pipeline: <code>Scope Guard → Collector → Normalizer → Rule → Observation → Finding → Evidence</code>
-        </p>
-      </div>
+  const columns: DataTableColumn<CheckExecutionRecord>[] = [
+    {
+      key: 'executedAt',
+      label: 'Executed At',
+      width: '120px',
+      render: (row) => (
+        <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
+          {new Date(row.executedAt).toLocaleTimeString()}
+        </span>
+      ),
+    },
+    {
+      key: 'id',
+      label: 'Execution ID',
+      width: '120px',
+      render: (row) => (
+        <code style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
+          {row.id}
+        </code>
+      ),
+    },
+    {
+      key: 'ruleId',
+      label: 'Rule Module',
+      width: '110px',
+      render: (row) => (
+        <code style={{ color: 'var(--accent)', fontWeight: 600 }}>
+          {row.ruleId}
+        </code>
+      ),
+    },
+    {
+      key: 'target',
+      label: 'Target',
+      render: (row) => (
+        <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>
+          {row.target}
+        </span>
+      ),
+    },
+    {
+      key: 'scopeDecision',
+      label: 'Scope Guard',
+      width: '100px',
+      render: (row) => (
+        <span
+          className="wb-chip"
+          style={{
+            background:
+              row.scopeDecision === 'ALLOW'
+                ? 'var(--status-pass-bg)'
+                : 'var(--status-blocked-bg)',
+            color:
+              row.scopeDecision === 'ALLOW'
+                ? 'var(--status-pass-text)'
+                : 'var(--status-blocked-text)',
+            border: `1px solid ${
+              row.scopeDecision === 'ALLOW'
+                ? 'var(--status-pass-border)'
+                : 'var(--status-blocked-border)'
+            }`,
+          }}
+        >
+          {row.scopeDecision}
+        </span>
+      ),
+    },
+    {
+      key: 'status',
+      label: 'Status',
+      width: '110px',
+      render: (row) => <StatusBadge status={row.status} size="sm" />,
+    },
+    {
+      key: 'durationMs',
+      label: 'Duration',
+      width: '90px',
+      render: (row) => (
+        <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
+          {row.durationMs !== undefined ? `${row.durationMs}ms` : '—'}
+        </span>
+      ),
+    },
+  ];
 
-      {/* Execution Launcher Form */}
-      <div
-        style={{
-          padding: '24px',
-          borderRadius: '8px',
-          backgroundColor: 'var(--bg-surface)',
-          border: '1px solid var(--border-default)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
-          <PlayCircle size={18} color="var(--accent)" />
-          <h2 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>
-            Execute Defensive Security Check
-          </h2>
+  // Group rules by category for select dropdown
+  const groupedRules: Record<string, SecurityRuleMetadata[]> = {};
+  for (const r of rules) {
+    if (!groupedRules[r.category]) {
+      groupedRules[r.category] = [];
+    }
+    groupedRules[r.category].push(r);
+  }
+
+  if (loading && !isDemoMode) {
+    return <StatePanel kind="loading" title="Loading Execution Telemetry..." />;
+  }
+
+  if (error && !isDemoMode) {
+    return (
+      <StatePanel
+        kind="offline"
+        title="Check Execution Service Offline"
+        description="Could not query available security rules or past execution records from backend."
+        errorMessage={error}
+        onRetry={loadData}
+      />
+    );
+  }
+
+  return (
+    <div className="wb-split-v">
+      {/* =========================================================================
+          Top Pane: Execution Launcher Form & Real-Time Output Banner
+          ========================================================================= */}
+      <div className="wb-panel" style={{ overflow: 'visible' }}>
+        <div className="wb-panel-header">
+          <div className="wb-panel-title">
+            <PlayCircle size={14} color="var(--accent)" />
+            <span>Defensive Security Check Execution Pipeline</span>
+            {isDemoMode && <DemoBadge />}
+          </div>
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+            Scope Guard: <strong>Enforcing Default-Deny</strong>
+          </span>
         </div>
 
-        <form onSubmit={handleRunExecution} style={{ display: 'grid', gridTemplateColumns: '1fr 2fr auto', gap: '12px', alignItems: 'flex-end' }}>
-          <div>
-            <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Security Rule</label>
-            <select
-              value={ruleId}
-              onChange={(e) => setRuleId(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                borderRadius: '6px',
-                backgroundColor: 'var(--bg-canvas)',
-                border: '1px solid var(--border-default)',
-                color: 'var(--text-primary)',
-                fontSize: '13px',
-                fontFamily: 'var(--font-mono)',
-              }}
-            >
-              <optgroup label="Web Application Security">
-                <option value="SEC-WEB-001">SEC-WEB-001: HTTP Security Headers Validation</option>
-                <option value="SEC-WEB-002">SEC-WEB-002: Cookie Defensive Flags (Secure, HttpOnly, SameSite)</option>
-                <option value="SEC-WEB-003">SEC-WEB-003: Server Banner & Tech Stack Disclosure</option>
-                <option value="SEC-WEB-004">SEC-WEB-004: CORS Policy & Access-Control Misconfiguration</option>
-                <option value="SEC-WEB-005">SEC-WEB-005: Sensitive Files & RFC 9116 security.txt</option>
-              </optgroup>
-              <optgroup label="Transport & Network Security">
-                <option value="SEC-TLS-001">SEC-TLS-001: TLS Certificate & Cipher Version Check</option>
-                <option value="SEC-NET-001">SEC-NET-001: Authorized Port & Critical Service Exposure Probe</option>
-              </optgroup>
-              <optgroup label="DNS & Domain Security">
-                <option value="SEC-DNS-001">SEC-DNS-001: DNS Email Anti-Spoofing (SPF/DMARC)</option>
-                <option value="SEC-DNS-002">SEC-DNS-002: DNS CAA (Certificate Authority Auth) Record</option>
-              </optgroup>
-              <optgroup label="Cryptography & Identity">
-                <option value="SEC-CRYPTO-001">SEC-CRYPTO-001: Cryptographic Hash Algorithm Strength</option>
-                <option value="SEC-AUTH-001">SEC-AUTH-001: Password Policy & Entropy Compliance Auditor</option>
-              </optgroup>
-            </select>
-          </div>
-
-          <div>
-            <label style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>
-              Target / Test Sample
-            </label>
-            <input
-              type="text"
-              value={target}
-              onChange={(e) => setTarget(e.target.value)}
-              placeholder={
-                ruleId === 'SEC-CRYPTO-001'
-                  ? 'e.g. 5d41402abc4b2a76b9719d911017c592 or SHA256 string'
-                  : ruleId === 'SEC-AUTH-001'
-                  ? 'e.g. PasswordToAudit123!'
-                  : ruleId === 'SEC-NET-001'
-                  ? 'e.g. 192.168.1.50 or app.lab.local'
-                  : 'e.g. app.lab.local, lab.local'
-              }
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                borderRadius: '6px',
-                backgroundColor: 'var(--bg-canvas)',
-                border: '1px solid var(--border-default)',
-                color: 'var(--text-primary)',
-                fontSize: '13px',
-                fontFamily: 'var(--font-mono)',
-                boxSizing: 'border-box',
-              }}
-            />
-          </div>
-
-          <button
-            type="submit"
-            disabled={running || !target.trim()}
+        <div className="wb-panel-body" style={{ padding: '16px' }}>
+          <form
+            onSubmit={handleOpenConfirm}
             style={{
-              padding: '10px 20px',
-              borderRadius: '6px',
-              backgroundColor: 'var(--accent)',
-              color: '#090d16',
-              fontSize: '13px',
-              fontWeight: 600,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              opacity: running || !target.trim() ? 0.6 : 1,
+              display: 'grid',
+              gridTemplateColumns: '1.2fr 2fr auto',
+              gap: '10px',
+              alignItems: 'flex-end',
             }}
           >
-            <PlayCircle size={16} /> Execute Check
-          </button>
-        </form>
-
-        {lastResult && (
-          <div
-            style={{
-              marginTop: '16px',
-              padding: '18px',
-              borderRadius: '6px',
-              backgroundColor: lastResult.allowed
-                ? (lastResult.executionRecord.status === 'FAIL' ? 'var(--status-fail-bg)' : 'var(--status-pass-bg)')
-                : 'var(--status-blocked-bg)',
-              border: `1px solid ${
-                lastResult.allowed
-                  ? (lastResult.executionRecord.status === 'FAIL' ? 'var(--status-fail-border)' : 'var(--status-pass-border)')
-                  : 'var(--status-blocked-border)'
-              }`,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                {lastResult.allowed ? (
-                  lastResult.executionRecord.status === 'FAIL' ? <AlertTriangle size={18} color="var(--status-fail-text)" /> : <ShieldCheck size={18} color="var(--status-pass-text)" />
-                ) : (
-                  <ShieldAlert size={18} color="var(--status-blocked-text)" />
-                )}
-                <span
-                  style={{
-                    fontSize: '13px',
-                    fontWeight: 700,
-                    fontFamily: 'var(--font-mono)',
-                    color: lastResult.allowed
-                      ? (lastResult.executionRecord.status === 'FAIL' ? 'var(--status-fail-text)' : 'var(--status-pass-text)')
-                      : 'var(--status-blocked-text)',
-                  }}
-                >
-                  {lastResult.allowed ? `EXECUTION COMPLETED: ${lastResult.executionRecord.status}` : 'BLOCKED — OUT OF SCOPE'}
-                </span>
-              </div>
-              <StatusBadge status={lastResult.executionRecord.status} size="sm" />
+            <div>
+              <label
+                style={{
+                  display: 'block',
+                  fontSize: '11px',
+                  color: 'var(--text-muted)',
+                  marginBottom: '4px',
+                  fontWeight: 600,
+                }}
+              >
+                Security Rule Module ({rules.length} Available)
+              </label>
+              <select
+                className="wb-select"
+                value={ruleId}
+                onChange={(e) => setRuleId(e.target.value)}
+                style={{ width: '100%', fontFamily: 'var(--font-mono)' }}
+              >
+                {Object.entries(groupedRules).map(([cat, catRules]) => (
+                  <optgroup key={cat} label={cat}>
+                    {catRules.map((r) => (
+                      <option key={r.ruleId} value={r.ruleId}>
+                        {r.ruleId}: {r.title}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
             </div>
 
-            <pre
+            <div>
+              <label
+                style={{
+                  display: 'block',
+                  fontSize: '11px',
+                  color: 'var(--text-muted)',
+                  marginBottom: '4px',
+                  fontWeight: 600,
+                }}
+              >
+                Target Identifier / Test Sample
+              </label>
+              <input
+                type="text"
+                required
+                className="wb-input font-mono"
+                placeholder={getTargetPlaceholder()}
+                value={target}
+                onChange={(e) => setTarget(e.target.value)}
+                style={{ width: '100%' }}
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={running || !target.trim()}
+              className="wb-btn wb-btn-primary"
+              style={{ padding: '6px 14px' }}
+            >
+              {running ? (
+                <>
+                  <RefreshCw size={13} className="spin" />
+                  Running...
+                </>
+              ) : (
+                <>
+                  <PlayCircle size={14} />
+                  Execute Check
+                </>
+              )}
+            </button>
+          </form>
+
+          {/* Selected Rule Documentation Hint */}
+          {selectedRuleMeta && (
+            <div
               style={{
-                fontSize: '12px',
-                fontFamily: 'var(--font-mono)',
-                color: 'var(--text-primary)',
-                whiteSpace: 'pre-wrap',
-                marginTop: '4px',
+                marginTop: '10px',
+                padding: '8px 12px',
+                borderRadius: '3px',
+                background: 'var(--bg-table-zebra)',
+                border: '1px solid var(--border-subtle)',
+                fontSize: '11px',
+                color: 'var(--text-secondary)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
               }}
             >
-              {lastResult.message}
-            </pre>
+              <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                {selectedRuleMeta.title}
+              </span>
+              <span>Classification: <code style={{ color: 'var(--accent)' }}>{selectedRuleMeta.cwe}</code></span>
+              <span style={{ color: 'var(--text-muted)' }}>{selectedRuleMeta.description}</span>
+            </div>
+          )}
 
-            {/* If Finding was produced */}
-            {lastResult.finding && (
-              <div style={{ marginTop: '12px', padding: '12px', borderRadius: '6px', backgroundColor: 'var(--bg-surface)', border: '1px solid var(--border-default)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                  <SeverityBadge severity={lastResult.finding.severity} size="sm" />
-                  <strong style={{ fontSize: '13px', color: 'var(--text-primary)' }}>{lastResult.finding.title}</strong>
+          {/* Execution Error Banner */}
+          {runError && (
+            <div
+              style={{
+                marginTop: '12px',
+                padding: '10px 14px',
+                borderRadius: '4px',
+                background: 'var(--status-error-bg)',
+                border: '1px solid var(--status-error-border)',
+                color: 'var(--status-error-text)',
+                fontSize: '11px',
+              }}
+            >
+              <strong>Check Execution Error:</strong> {runError}
+            </div>
+          )}
+
+          {/* Last Result Live Output Banner */}
+          {lastResult && (
+            <div
+              style={{
+                marginTop: '12px',
+                padding: '12px 14px',
+                borderRadius: '4px',
+                backgroundColor: lastResult.allowed
+                  ? lastResult.executionRecord.status === 'FAIL'
+                    ? 'var(--status-fail-bg)'
+                    : 'var(--status-pass-bg)'
+                  : 'var(--status-blocked-bg)',
+                border: `1px solid ${
+                  lastResult.allowed
+                    ? lastResult.executionRecord.status === 'FAIL'
+                      ? 'var(--status-fail-border)'
+                      : 'var(--status-pass-border)'
+                    : 'var(--status-blocked-border)'
+                }`,
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {lastResult.allowed ? (
+                    lastResult.executionRecord.status === 'FAIL' ? (
+                      <AlertTriangle size={16} color="var(--status-fail-text)" />
+                    ) : (
+                      <ShieldCheck size={16} color="var(--status-pass-text)" />
+                    )
+                  ) : (
+                    <ShieldAlert size={16} color="var(--status-blocked-text)" />
+                  )}
+                  <span
+                    style={{
+                      fontWeight: 700,
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: '12px',
+                      color: lastResult.allowed
+                        ? lastResult.executionRecord.status === 'FAIL'
+                          ? 'var(--status-fail-text)'
+                          : 'var(--status-pass-text)'
+                        : 'var(--status-blocked-text)',
+                    }}
+                  >
+                    {lastResult.allowed
+                      ? `CHECK RESULT: ${lastResult.executionRecord.status}`
+                      : 'SCOPE VIOLATION — BLOCKED'}
+                  </span>
                 </div>
-                <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{lastResult.finding.description}</p>
-                {lastResult.finding.cwe && <div style={{ fontSize: '11px', color: 'var(--accent)', marginTop: '4px' }}>{lastResult.finding.cwe}</div>}
+                <StatusBadge status={lastResult.executionRecord.status} size="sm" />
               </div>
-            )}
 
-            {/* If Evidence was recorded */}
-            {lastResult.evidence && (
-              <div style={{ marginTop: '8px', fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                Cryptographic Evidence SHA-256: <code>{lastResult.evidence.sha256}</code>
+              <div
+                style={{
+                  fontSize: '11px',
+                  fontFamily: 'var(--font-mono)',
+                  color: 'var(--text-primary)',
+                  whiteSpace: 'pre-wrap',
+                }}
+              >
+                {lastResult.message}
+              </div>
+
+              {lastResult.finding && (
+                <div
+                  style={{
+                    marginTop: '8px',
+                    padding: '8px 10px',
+                    background: 'var(--bg-surface)',
+                    border: '1px solid var(--border-default)',
+                    borderRadius: '3px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                  }}
+                >
+                  <SeverityBadge severity={lastResult.finding.severity} size="sm" />
+                  <span style={{ fontWeight: 600, fontSize: '11px', color: 'var(--text-primary)' }}>
+                    {lastResult.finding.title}
+                  </span>
+                  {lastResult.finding.cwe && (
+                    <code style={{ fontSize: '10px', color: 'var(--accent)' }}>
+                      {lastResult.finding.cwe}
+                    </code>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* =========================================================================
+          Bottom Pane: Split Table of Past Executions & Inspector
+          ========================================================================= */}
+      <div className="wb-split-h">
+        {/* Executions Table */}
+        <div className="wb-panel">
+          <div className="wb-panel-header">
+            <div className="wb-panel-title">
+              <Terminal size={14} color="var(--text-secondary)" />
+              <span>Execution Audit Log</span>
+              <span className="wb-panel-count">{executions.length}</span>
+            </div>
+            <button
+              onClick={loadData}
+              className="wb-btn wb-btn-sm"
+              title="Refresh executions from backend"
+            >
+              <RefreshCw size={10} />
+              Refresh
+            </button>
+          </div>
+
+          <div className="wb-panel-body">
+            <DataTable
+              columns={columns}
+              data={executions}
+              keyExtractor={(row) => row.id}
+              selectedId={selectedExec?.id}
+              onSelectRow={(row) => setSelectedExec(row)}
+              emptyMessage="No execution records recorded. Run a check above."
+            />
+          </div>
+        </div>
+
+        {/* Selected Execution Inspector */}
+        <div className="wb-panel">
+          <div className="wb-panel-header">
+            <div className="wb-panel-title">
+              <span>Execution Details: {selectedExec?.id || 'None'}</span>
+            </div>
+          </div>
+
+          <div className="wb-panel-body" style={{ padding: '12px' }}>
+            {selectedExec ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <KeyValue
+                  items={[
+                    { key: 'Execution ID', value: selectedExec.id },
+                    { key: 'Assessment ID', value: selectedExec.assessmentId },
+                    { key: 'Rule Module', value: selectedExec.ruleId },
+                    { key: 'Target', value: selectedExec.target },
+                    {
+                      key: 'Scope Guard',
+                      value: (
+                        <span
+                          className="wb-chip"
+                          style={{
+                            background:
+                              selectedExec.scopeDecision === 'ALLOW'
+                                ? 'var(--status-pass-bg)'
+                                : 'var(--status-blocked-bg)',
+                            color:
+                              selectedExec.scopeDecision === 'ALLOW'
+                                ? 'var(--status-pass-text)'
+                                : 'var(--status-blocked-text)',
+                          }}
+                        >
+                          {selectedExec.scopeDecision}
+                        </span>
+                      ),
+                    },
+                    {
+                      key: 'Outcome Status',
+                      value: <StatusBadge status={selectedExec.status} size="sm" />,
+                    },
+                    {
+                      key: 'Execution Time',
+                      value: `${selectedExec.durationMs ?? '—'} ms`,
+                    },
+                    {
+                      key: 'Timestamp (UTC)',
+                      value: new Date(selectedExec.executedAt).toUTCString(),
+                    },
+                  ]}
+                />
+
+                {selectedExec.errorMessage && (
+                  <div>
+                    <div
+                      style={{
+                        fontSize: '10px',
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                        color: 'var(--status-blocked-text)',
+                        marginBottom: '4px',
+                      }}
+                    >
+                      Error / Scope Message
+                    </div>
+                    <pre
+                      style={{
+                        padding: '8px',
+                        background: 'var(--status-blocked-bg)',
+                        border: '1px solid var(--status-blocked-border)',
+                        color: 'var(--status-blocked-text)',
+                        fontSize: '11px',
+                        borderRadius: '3px',
+                        whiteSpace: 'pre-wrap',
+                      }}
+                    >
+                      {selectedExec.errorMessage}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                Select an execution record to view complete operational telemetry.
               </div>
             )}
           </div>
-        )}
-      </div>
-
-      {/* Execution Audit Log Table */}
-      <div
-        style={{
-          borderRadius: '8px',
-          backgroundColor: 'var(--bg-surface)',
-          border: '1px solid var(--border-subtle)',
-          overflow: 'hidden',
-        }}
-      >
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-subtle)' }}>
-          <h2 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>
-            Execution Audit Trail ({history.length})
-          </h2>
-          <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-            Every target-based execution record preserves scope decision, status, duration, and timestamp.
-          </p>
-        </div>
-
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
-            <thead>
-              <tr style={{ backgroundColor: 'var(--bg-surface-elevated)', color: 'var(--text-secondary)', borderBottom: '1px solid var(--border-subtle)' }}>
-                <th style={{ padding: '12px 20px', fontWeight: 600 }}>Execution ID</th>
-                <th style={{ padding: '12px 20px', fontWeight: 600 }}>Rule</th>
-                <th style={{ padding: '12px 20px', fontWeight: 600 }}>Target</th>
-                <th style={{ padding: '12px 20px', fontWeight: 600 }}>Scope Decision</th>
-                <th style={{ padding: '12px 20px', fontWeight: 600 }}>Status</th>
-                <th style={{ padding: '12px 20px', fontWeight: 600 }}>Duration</th>
-                <th style={{ padding: '12px 20px', fontWeight: 600 }}>Time</th>
-              </tr>
-            </thead>
-            <tbody>
-              {history.map((row) => (
-                <tr key={row.id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                  <td style={{ padding: '12px 20px', fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>
-                    {row.id}
-                  </td>
-                  <td style={{ padding: '12px 20px', fontFamily: 'var(--font-mono)', color: 'var(--accent)' }}>
-                    {row.ruleId}
-                  </td>
-                  <td style={{ padding: '12px 20px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
-                    {row.target}
-                  </td>
-                  <td style={{ padding: '12px 20px' }}>
-                    <span
-                      style={{
-                        padding: '2px 8px',
-                        borderRadius: '4px',
-                        fontSize: '11px',
-                        fontWeight: 700,
-                        fontFamily: 'var(--font-mono)',
-                        backgroundColor: row.scopeDecision === 'ALLOW' ? 'var(--status-pass-bg)' : 'var(--status-blocked-bg)',
-                        color: row.scopeDecision === 'ALLOW' ? 'var(--status-pass-text)' : 'var(--status-blocked-text)',
-                      }}
-                    >
-                      {row.scopeDecision}
-                    </span>
-                  </td>
-                  <td style={{ padding: '12px 20px' }}>
-                    <StatusBadge status={row.status} size="sm" />
-                  </td>
-                  <td style={{ padding: '12px 20px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
-                    {row.duration}
-                  </td>
-                  <td style={{ padding: '12px 20px', color: 'var(--text-muted)', fontSize: '12px' }}>
-                    {row.time}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
       </div>
+
+      {/* Confirmation Modal Before Execution */}
+      <ConfirmDialog
+        isOpen={showConfirmModal}
+        title="Confirm Defensive Security Check Execution"
+        message={
+          <div>
+            <p style={{ marginBottom: '8px' }}>
+              You are about to execute the defensive security analyzer against target:
+            </p>
+            <div
+              style={{
+                background: 'var(--bg-table-zebra)',
+                border: '1px solid var(--border-subtle)',
+                padding: '8px 12px',
+                borderRadius: '3px',
+                fontSize: '11px',
+                fontFamily: 'var(--font-mono)',
+              }}
+            >
+              <div><strong>Rule:</strong> {ruleId} ({selectedRuleMeta?.title})</div>
+              <div><strong>Target:</strong> {target}</div>
+              <div><strong>Assessment ID:</strong> {assessmentId}</div>
+            </div>
+            <p style={{ marginTop: '8px', fontSize: '11px', color: 'var(--text-muted)' }}>
+              Scope Guard will evaluate this target before any socket connection or network transmission.
+              Out-of-scope targets will be blocked immediately without touching the target.
+            </p>
+          </div>
+        }
+        confirmLabel="Execute Now"
+        onConfirm={handleExecuteCheck}
+        onCancel={() => setShowConfirmModal(false)}
+      />
     </div>
   );
 };
