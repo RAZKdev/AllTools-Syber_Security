@@ -30,7 +30,7 @@ class EvidenceStore:
 
     def __init__(self, base_dir: Optional[Path] = None) -> None:
         default_dir = os.environ.get("EVIDENCE_STORAGE_DIR", "database/evidence")
-        self.base_dir = Path(base_dir or default_dir)
+        self.base_dir = Path(base_dir or default_dir).resolve()
         self._evidence_records: Dict[str, Evidence] = {}
 
     @classmethod
@@ -105,7 +105,10 @@ class EvidenceStore:
             # Store normalized relative path
             safe_asm = re.sub(r"[^a-zA-Z0-9_\-]", "", assessment_id) or "default"
             safe_evd = re.sub(r"[^a-zA-Z0-9_\-]", "", evidence_id) or "artifact"
-            artifact_path_str = str(target_file.relative_to(self.base_dir.parent)).replace("\\", "/") if self.base_dir.parent != self.base_dir else str(target_file).replace("\\", "/")
+            try:
+                artifact_path_str = str(target_file.relative_to(Path.cwd().resolve())).replace("\\", "/")
+            except ValueError:
+                artifact_path_str = str(target_file).replace("\\", "/")
         except Exception as e:
             # Fallback to in-memory metadata if filesystem error
             artifact_path_str = None
