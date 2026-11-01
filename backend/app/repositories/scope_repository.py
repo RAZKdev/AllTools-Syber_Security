@@ -88,6 +88,29 @@ class InMemoryScopeRepository:
     def list_engagements(self) -> List[Engagement]:
         return list(self._engagements.values())
 
+    def update_engagement_status(
+        self,
+        engagement_id: str,
+        new_status: EngagementStatus,
+    ) -> Engagement:
+        engagement = self._engagements.get(engagement_id)
+        if not engagement:
+            raise KeyError(f"Engagement '{engagement_id}' not found.")
+        updated = Engagement(
+            id=engagement.id,
+            workspaceId=engagement.workspaceId,
+            name=engagement.name,
+            description=engagement.description,
+            assessor=engagement.assessor,
+            status=new_status,
+            startsAt=engagement.startsAt,
+            endsAt=engagement.endsAt,
+            rulesOfEngagement=engagement.rulesOfEngagement,
+            createdAt=engagement.createdAt,
+        )
+        self._engagements[engagement_id] = updated
+        return updated
+
     # Assessment operations
     def create_assessment(self, data: AssessmentCreate) -> Assessment:
         assessment_id = data.id or f"ASM-{uuid.uuid4().hex[:8]}"
@@ -111,6 +134,35 @@ class InMemoryScopeRepository:
         if engagement_id:
             return [a for a in self._assessments.values() if a.engagementId == engagement_id]
         return list(self._assessments.values())
+
+    def update_assessment_status(
+        self,
+        assessment_id: str,
+        new_status: AssessmentStatus,
+        started_at: Optional[datetime] = None,
+        completed_at: Optional[datetime] = None,
+    ) -> Assessment:
+        assessment = self._assessments.get(assessment_id)
+        if not assessment:
+            raise KeyError(f"Assessment '{assessment_id}' not found.")
+        now = datetime.now(timezone.utc)
+        if new_status == AssessmentStatus.RUNNING and not assessment.startedAt:
+            started_at = started_at or now
+        elif new_status in (AssessmentStatus.COMPLETED, AssessmentStatus.FAILED, AssessmentStatus.CANCELLED):
+            completed_at = completed_at or now
+
+        updated = Assessment(
+            id=assessment.id,
+            engagementId=assessment.engagementId,
+            name=assessment.name,
+            type=assessment.type,
+            status=new_status,
+            startedAt=started_at or assessment.startedAt,
+            completedAt=completed_at or assessment.completedAt,
+            createdAt=assessment.createdAt,
+        )
+        self._assessments[assessment_id] = updated
+        return updated
 
     # Scope operations
     def create_scope_item(self, data: ScopeItemCreate) -> ScopeItem:

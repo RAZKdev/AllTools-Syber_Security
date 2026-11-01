@@ -190,6 +190,38 @@ class ScopeGuard:
 
         return False
 
+    @classmethod
+    def calculate_rule_specificity(cls, rule: ScopeItem) -> int:
+        """
+        Calculate specificity weight for scope rule to enforce deterministic precedence:
+        - Domain/subdomain: number of labels * 1000 + string length
+        - IP: 32000 (IPv4) or 128000 (IPv6)
+        - CIDR: prefix length * 100
+        - URL: length of URL string
+        - Generic: length of pattern
+        """
+        if rule.type in (ScopeType.DOMAIN, ScopeType.SUBDOMAIN, ScopeType.HOSTNAME):
+            val = rule.value.lower().strip()
+            if val.startswith("*."):
+                val = val[2:]
+            labels = [p for p in val.split(".") if p]
+            return len(labels) * 1000 + len(val)
+        if rule.type == ScopeType.IP:
+            try:
+                ip = ipaddress.ip_address(rule.value.strip())
+                return 32000 if ip.version == 4 else 128000
+            except ValueError:
+                return 1000
+        if rule.type == ScopeType.CIDR:
+            try:
+                net = ipaddress.ip_network(rule.value.strip(), strict=False)
+                return net.prefixlen * 100
+            except ValueError:
+                return 1000
+        if rule.type == ScopeType.URL:
+            return 5000 + len(rule.value.strip())
+        return len(rule.value.strip())
+
     def evaluate_target(
         self,
         assessment_id: str,
@@ -200,12 +232,16 @@ class ScopeGuard:
         """
         Evaluate target authorization against assessment scope items.
         
-        Algorithm:
+        Deterministic Precedence Algorithm:
         1. Clean and validate target input. Empty target is blocked immediately.
-        2. Filter out expired scope items.
-        3. Check explicit exclusions (inScope=False). If matched, BLOCK immediately.
-        4. Check inclusions (inScope=True). If matched, ALLOW.
-        5. If no inclusion matched, default to BLOCK (fail closed).
+        2. Partition rules into active exclusions, active inclusions, and expired rules.
+        3. Check explicit active exclusions (inScope=False). If matched, BLOCK immediately.
+        4. Check active inclusions. If matched:
+           - Check if target also matches a more specific expired rule.
+           - If a matching expired rule has specificity >= active inclusion, BLOCK (cannot inherit from broader parent).
+           - Otherwise, ALLOW.
+        5. If no active inclusion matched, check if an expired rule matched -> BLOCK (expired rule decision).
+        6. If no rule matched, default to BLOCK (fail closed).
         """
         cleaned_target = target.strip()
         now = datetime.now(timezone.utc)
@@ -220,45 +256,93 @@ class ScopeGuard:
                 evaluatedAt=now,
             )
 
-        # Separate active rules (exclude expired)
-        active_rules: List[ScopeItem] = []
+        # Partition rules: active exclusions, active inclusions, expired rules
+        active_exclusions: List[ScopeItem] = []
+        active_inclusions: List[ScopeItem] = []
+        expired_rules: List[ScopeItem] = []
+
         for item in scope_items:
+            is_expired = False
             if item.expiresAt:
-                # Ensure timezone awareness for comparison
                 item_expires = item.expiresAt
                 if item_expires.tzinfo is None:
                     item_expires = item_expires.replace(tzinfo=timezone.utc)
                 if now > item_expires:
-                    continue  # Expired rule, skip
-            active_rules.append(item)
+                    is_expired = True
 
-        # 1. First pass: Explicit Exclusions (Blacklist priority)
-        for item in active_rules:
-            if not item.inScope:
-                if self.matches_rule(cleaned_target, item):
+            if is_expired:
+                expired_rules.append(item)
+            elif not item.inScope:
+                active_exclusions.append(item)
+            else:
+                active_inclusions.append(item)
+
+        # 1. First pass: Explicit Exclusions (Blacklist priority — ALWAYS DENIES)
+        for item in active_exclusions:
+            if self.matches_rule(cleaned_target, item):
+                return ScopeDecisionResult(
+                    assessmentId=assessment_id,
+                    target=cleaned_target,
+                    decision=ScopeDecision.BLOCK,
+                    reason=f"Target explicitly excluded by scope rule '{item.id}' ({item.type}: {item.value}).",
+                    matchedScopeItemId=item.id,
+                    evaluatedAt=now,
+                )
+
+        # 2. Second pass: Active Inclusions vs Expired Rule Specificity
+        matching_active_inclusions = [
+            item for item in active_inclusions if self.matches_rule(cleaned_target, item)
+        ]
+        matching_expired_rules = [
+            item for item in expired_rules if self.matches_rule(cleaned_target, item)
+        ]
+
+        if matching_active_inclusions:
+            best_active = max(matching_active_inclusions, key=self.calculate_rule_specificity)
+            # If an expired rule also matches this target, check specificity
+            if matching_expired_rules:
+                best_expired = max(matching_expired_rules, key=self.calculate_rule_specificity)
+                # If the expired rule is more specific or equally specific as the active inclusion,
+                # the target CANNOT inherit authorization from the broader parent inclusion!
+                if self.calculate_rule_specificity(best_expired) >= self.calculate_rule_specificity(best_active):
+                    exp_time = best_expired.expiresAt.isoformat() if best_expired.expiresAt else "unknown"
                     return ScopeDecisionResult(
                         assessmentId=assessment_id,
                         target=cleaned_target,
                         decision=ScopeDecision.BLOCK,
-                        reason=f"Target explicitly excluded by scope rule '{item.id}' ({item.type}: {item.value}).",
-                        matchedScopeItemId=item.id,
+                        reason=(
+                            f"Target blocked: matched expired scope rule '{best_expired.id}' "
+                            f"({best_expired.type}: {best_expired.value}, expired at {exp_time}). "
+                            f"Specific expired rule takes precedence over broader parent scope rule '{best_active.id}'."
+                        ),
+                        matchedScopeItemId=best_expired.id,
                         evaluatedAt=now,
                     )
 
-        # 2. Second pass: Inclusions (Whitelist)
-        for item in active_rules:
-            if item.inScope:
-                if self.matches_rule(cleaned_target, item):
-                    return ScopeDecisionResult(
-                        assessmentId=assessment_id,
-                        target=cleaned_target,
-                        decision=ScopeDecision.ALLOW,
-                        reason=f"Target authorized by scope rule '{item.id}' ({item.type}: {item.value}).",
-                        matchedScopeItemId=item.id,
-                        evaluatedAt=now,
-                    )
+            # Active inclusion authorized
+            return ScopeDecisionResult(
+                assessmentId=assessment_id,
+                target=cleaned_target,
+                decision=ScopeDecision.ALLOW,
+                reason=f"Target authorized by scope rule '{best_active.id}' ({best_active.type}: {best_active.value}).",
+                matchedScopeItemId=best_active.id,
+                evaluatedAt=now,
+            )
 
-        # 3. Default Deny / Fail Closed
+        # 3. Third pass: No active inclusion, but matched an expired rule
+        if matching_expired_rules:
+            best_expired = max(matching_expired_rules, key=self.calculate_rule_specificity)
+            exp_time = best_expired.expiresAt.isoformat() if best_expired.expiresAt else "unknown"
+            return ScopeDecisionResult(
+                assessmentId=assessment_id,
+                target=cleaned_target,
+                decision=ScopeDecision.BLOCK,
+                reason=f"Target blocked: scope authorization rule '{best_expired.id}' expired at {exp_time}.",
+                matchedScopeItemId=best_expired.id,
+                evaluatedAt=now,
+            )
+
+        # 4. Default Deny / Fail Closed
         return ScopeDecisionResult(
             assessmentId=assessment_id,
             target=cleaned_target,

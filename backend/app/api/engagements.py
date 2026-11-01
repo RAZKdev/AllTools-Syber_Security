@@ -1,10 +1,15 @@
 from typing import List
 from fastapi import APIRouter, HTTPException, status
+from pydantic import BaseModel
 
-from app.schemas.engagement import Engagement, EngagementCreate
+from app.schemas.engagement import Engagement, EngagementCreate, EngagementStatus
 from app.repositories.scope_repository import scope_repository
 
 router = APIRouter(prefix="/engagements")
+
+
+class EngagementStatusUpdate(BaseModel):
+    status: EngagementStatus
 
 
 @router.post("", response_model=Engagement, status_code=status.HTTP_201_CREATED)
@@ -29,3 +34,15 @@ def get_engagement(engagement_id: str) -> Engagement:
             detail=f"Engagement '{engagement_id}' not found.",
         )
     return engagement
+
+
+@router.patch("/{engagement_id}/status", response_model=Engagement)
+def update_engagement_status(engagement_id: str, payload: EngagementStatusUpdate) -> Engagement:
+    """Update engagement lifecycle status."""
+    engagement = scope_repository.get_engagement(engagement_id)
+    if not engagement:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Engagement '{engagement_id}' not found.",
+        )
+    return scope_repository.update_engagement_status(engagement_id, payload.status)

@@ -38,3 +38,41 @@ def test_evidence_sensitive_redaction(store):
     record = store.get_evidence(ev.id)
     assert record is not None
     assert record.sha256 == ev.sha256
+
+
+def test_evidence_disk_persistence_and_integrity_verification(tmp_path):
+    """Verify that evidence artifacts are saved to disk and SHA-256 matches disk bytes."""
+    custom_store = EvidenceStore(base_dir=tmp_path)
+    payload = {"scan": "complete", "open_ports": [80, 443]}
+    ev = custom_store.record_evidence(
+        assessment_id="ASM-PERSIST-01",
+        evidence_type=EvidenceType.JSON_RESULT,
+        source="scanner",
+        raw_content=payload,
+    )
+    assert ev.artifactPath is not None
+    # Artifact file exists on disk
+    artifact_file = tmp_path / "ASM-PERSIST-01" / f"{ev.id}.json"
+    assert artifact_file.is_file()
+
+    # Integrity verification matches
+    assert custom_store.verify_evidence_integrity(ev.id) is True
+
+    # Purge removes files
+    purged = custom_store.purge_evidence_for_assessment("ASM-PERSIST-01")
+    assert purged == 1
+    assert not artifact_file.is_file()
+
+
+def test_evidence_path_traversal_prevention(tmp_path):
+    """Verify that path traversal attempts in assessment_id are sanitized."""
+    custom_store = EvidenceStore(base_dir=tmp_path)
+    ev = custom_store.record_evidence(
+        assessment_id="../../etc/shadow",
+        evidence_type=EvidenceType.JSON_RESULT,
+        source="test",
+        raw_content="safe content",
+    )
+    # Traversal characters must be stripped
+    assert ".." not in ev.artifactPath
+    assert "shadow" in ev.artifactPath

@@ -1,3 +1,4 @@
+import html
 from datetime import datetime, timezone
 from typing import List, Optional
 from app.schemas.assessment import Assessment
@@ -123,12 +124,17 @@ class SecurityReportGenerator:
         evidence_list: List[Evidence],
     ) -> str:
         md_content = cls.generate_markdown(engagement, assessment, scope_items, findings, evidence_list)
-        # Produce a self-contained, printable, dark-first styled HTML page
-        html = f"""<!DOCTYPE html>
+        safe_title = html.escape(engagement.name, quote=True)
+        safe_md_content = html.escape(md_content, quote=True)
+
+        # Produce a self-contained, printable, dark-first styled HTML page with strict CSP and escaping
+        html_doc = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Security Assessment Report — {engagement.name}</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; font-src 'none'; img-src 'none'; sandbox;">
+  <meta http-equiv="X-Content-Type-Options" content="nosniff">
+  <title>Security Assessment Report — {safe_title}</title>
   <style>
     body {{
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -160,7 +166,7 @@ class SecurityReportGenerator:
   <div style="margin-bottom: 24px; font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;">
     AllTools-CyberSec • Authorized Defensive Security Workbench
   </div>
-  <pre style="white-space: pre-wrap; font-family: inherit; background: transparent; border: none; padding: 0;">{md_content}</pre>
+  <pre style="white-space: pre-wrap; font-family: inherit; background: transparent; border: none; padding: 0;">{safe_md_content}</pre>
 </body>
 </html>"""
-        return html
+        return html_doc

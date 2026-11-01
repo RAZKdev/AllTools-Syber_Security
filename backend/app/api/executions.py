@@ -1,5 +1,5 @@
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
@@ -8,6 +8,8 @@ from app.schemas.common import ExecutionStatus, ScopeDecision, FindingStatus
 from app.schemas.check_execution import CheckExecution
 from app.schemas.finding import FindingCreate
 from app.schemas.evidence import EvidenceType
+from app.schemas.assessment import Assessment, AssessmentStatus
+from app.schemas.engagement import Engagement, EngagementStatus
 from app.repositories.scope_repository import scope_repository
 from app.repositories.findings_repository import findings_repository
 from app.services.scope_guard import ScopeGuard, ScopeDecisionResult
@@ -124,6 +126,7 @@ AVAILABLE_RULES_METADATA = [
 
 class PreFlightCheckRequest(BaseModel):
     assessmentId: str = Field(..., min_length=1)
+    engagementId: Optional[str] = None
     ruleId: str = Field(..., min_length=1)
     target: str = Field(..., min_length=1)
     ruleVersion: Optional[str] = "1.0.0"
@@ -137,6 +140,7 @@ class PreFlightCheckResponse(BaseModel):
 
 class RunCheckRequest(BaseModel):
     assessmentId: str = Field(..., min_length=1)
+    engagementId: Optional[str] = None
     assetId: Optional[str] = "AST-001"
     ruleId: str = Field(..., min_length=1)
     target: str = Field(..., min_length=1)
@@ -152,6 +156,54 @@ class RunCheckResponse(BaseModel):
     message: str
 
 
+def validate_execution_authorization(
+    assessment_id: str,
+    engagement_id: Optional[str] = None,
+) -> Tuple[Assessment, Engagement]:
+    """
+    Server-side authorization and lifecycle state validation.
+    Mandates:
+    - Assessment exists (404)
+    - Parent engagement exists (404)
+    - Assessment belongs to specified engagement if provided (409)
+    - Engagement status must be ACTIVE (409)
+    - Assessment status must be RUNNING (409)
+    """
+    assessment = scope_repository.get_assessment(assessment_id)
+    if not assessment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Assessment '{assessment_id}' not found.",
+        )
+
+    engagement = scope_repository.get_engagement(assessment.engagementId)
+    if not engagement:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Parent engagement '{assessment.engagementId}' for assessment '{assessment_id}' not found.",
+        )
+
+    if engagement_id and assessment.engagementId != engagement_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Assessment '{assessment_id}' does not belong to specified engagement '{engagement_id}' (belongs to '{assessment.engagementId}').",
+        )
+
+    if engagement.status != EngagementStatus.ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Engagement '{engagement.id}' is in status '{engagement.status.value}', must be ACTIVE to execute checks.",
+        )
+
+    if assessment.status != AssessmentStatus.RUNNING:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Assessment '{assessment.id}' is in status '{assessment.status.value}', must be RUNNING to execute checks.",
+        )
+
+    return assessment, engagement
+
+
 @router.get("/rules")
 def get_available_rules():
     """List all available defensive security audit tools/rules."""
@@ -161,18 +213,21 @@ def get_available_rules():
 @router.post("/pre-flight", response_model=PreFlightCheckResponse)
 def pre_flight_check(payload: PreFlightCheckRequest) -> PreFlightCheckResponse:
     """Pre-flight check verifying target is within authorized scope."""
-    assessment = scope_repository.get_assessment(payload.assessmentId)
-    if not assessment:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Assessment '{payload.assessmentId}' not found.",
-        )
+    assessment, engagement = validate_execution_authorization(payload.assessmentId, payload.engagementId)
 
     OFFLINE_ANALYSIS_RULES = {"SEC-AUTH-001", "SEC-CRYPTO-001"}
-    if payload.ruleId in OFFLINE_ANALYSIS_RULES:
+    cleaned_target = payload.target.strip()
+    if not cleaned_target:
         decision = ScopeDecisionResult(
             assessmentId=payload.assessmentId,
             target=payload.target,
+            decision=ScopeDecision.BLOCK,
+            reason="Target specification is empty or whitespace.",
+        )
+    elif payload.ruleId in OFFLINE_ANALYSIS_RULES:
+        decision = ScopeDecisionResult(
+            assessmentId=payload.assessmentId,
+            target=cleaned_target,
             decision=ScopeDecision.ALLOW,
             reason="Authorized local analytical check (offline evaluation, zero external network transmission).",
         )
@@ -225,18 +280,21 @@ def run_check(payload: RunCheckRequest) -> RunCheckResponse:
     Run defensive security check with mandatory Scope Guard verification.
     If scope check fails, execution terminates immediately with BLOCKED_OUT_OF_SCOPE.
     """
-    assessment = scope_repository.get_assessment(payload.assessmentId)
-    if not assessment:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Assessment '{payload.assessmentId}' not found.",
-        )
+    assessment, engagement = validate_execution_authorization(payload.assessmentId, payload.engagementId)
 
     OFFLINE_ANALYSIS_RULES = {"SEC-AUTH-001", "SEC-CRYPTO-001"}
-    if payload.ruleId in OFFLINE_ANALYSIS_RULES:
+    cleaned_target = payload.target.strip()
+    if not cleaned_target:
         decision = ScopeDecisionResult(
             assessmentId=payload.assessmentId,
             target=payload.target,
+            decision=ScopeDecision.BLOCK,
+            reason="Target specification is empty or whitespace.",
+        )
+    elif payload.ruleId in OFFLINE_ANALYSIS_RULES:
+        decision = ScopeDecisionResult(
+            assessmentId=payload.assessmentId,
+            target=cleaned_target,
             decision=ScopeDecision.ALLOW,
             reason="Authorized local analytical check (offline evaluation, zero external network transmission).",
         )

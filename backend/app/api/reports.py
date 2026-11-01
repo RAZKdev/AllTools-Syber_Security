@@ -78,6 +78,9 @@ def get_html_report(assessment_id: str) -> Response:
         content=html_content,
         media_type="text/html",
         headers={
-            "Content-Disposition": f"inline; filename=report-{assessment_id}.html"
+            "Content-Disposition": f"inline; filename=report-{assessment_id}.html",
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox;",
+            "X-Content-Type-Options": "nosniff",
+            "X-Frame-Options": "DENY",
         },
     )
