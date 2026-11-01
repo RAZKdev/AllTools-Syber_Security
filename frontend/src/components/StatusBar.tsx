@@ -1,89 +1,152 @@
 import React from 'react';
-import { ShieldCheck, ShieldAlert, AlertTriangle, Database } from 'lucide-react';
+import {
+  ShieldCheck,
+  ShieldAlert,
+  AlertTriangle,
+  Database,
+  CircleSlash,
+} from 'lucide-react';
 import { ConnectionStatus, BackendConnectionState } from './ConnectionStatus';
-import { ScopeGuardVerificationStatus } from '@/services/api';
+import { EnforcementStatus } from '@/services/api';
 
 interface StatusBarProps {
   connectionState: BackendConnectionState;
-  isScopeGuardVerified: boolean;
+  lastCheckedAt: Date | null;
+  enforcementStatus: EnforcementStatus;
+  enforcementReason: string;
   isScopeGuardChecking: boolean;
-  scopeGuardStatus?: ScopeGuardVerificationStatus;
-  scopeRulesCount: number;
   isDemoMode: boolean;
+  assessmentId: string | null;
+  assessmentName: string | null;
+  engagementName: string | null;
+  scopeRulesCount: number | null;
   onRefreshConnection: () => void;
+}
+
+const EnforcementIcon: React.FC<{
+  status: EnforcementStatus;
+}> = ({ status }) => {
+  if (status === 'default_deny_verified') {
+    return <ShieldCheck size={12} color="var(--status-pass-text)" />;
+  }
+  if (status === 'probe_allowed' || status === 'unavailable') {
+    return <ShieldAlert size={12} color="var(--status-blocked-text)" />;
+  }
+  if (status === 'checking') {
+    return <AlertTriangle size={12} color="var(--status-warn-text)" />;
+  }
+  return <CircleSlash size={12} color="var(--text-muted)" />;
+};
+
+function enforcementLabel(
+  status: EnforcementStatus,
+  isChecking: boolean,
+): string {
+  if (isChecking) return 'Checking…';
+  switch (status) {
+    case 'default_deny_verified':
+      return 'Default-deny verified';
+    case 'probe_allowed':
+      return 'Not verified';
+    case 'unavailable':
+      return 'Unavailable';
+    case 'demo':
+      return 'n/a (demo)';
+    case 'not_checked':
+    default:
+      return 'Not checked';
+  }
 }
 
 export const StatusBar: React.FC<StatusBarProps> = ({
   connectionState,
-  isScopeGuardVerified,
+  lastCheckedAt,
+  enforcementStatus,
+  enforcementReason,
   isScopeGuardChecking,
-  scopeGuardStatus,
-  scopeRulesCount,
   isDemoMode,
+  assessmentId,
+  assessmentName,
+  engagementName,
+  scopeRulesCount,
   onRefreshConnection,
 }) => {
+  const enforcementText = enforcementLabel(
+    enforcementStatus,
+    isScopeGuardChecking,
+  );
+  const enforcementTone =
+    enforcementStatus === 'default_deny_verified'
+      ? 'var(--status-pass-text)'
+      : enforcementStatus === 'probe_allowed' ||
+          enforcementStatus === 'unavailable'
+        ? 'var(--status-blocked-text)'
+        : 'var(--text-secondary)';
+
   return (
-    <footer className="wb-statusbar">
+    <footer className="wb-statusbar" aria-label="Workbench status">
       <div className="wb-statusbar-group">
-        {/* Scope Guard Status */}
         <div className="wb-statusbar-item">
-          {isScopeGuardChecking ? (
-            <>
-              <span className="wb-status-dot warning" />
-              <span style={{ color: 'var(--status-warn-text)' }}>Scope Guard: Probing...</span>
-            </>
-          ) : scopeGuardStatus === 'VERIFIED_ACTIVE' || isScopeGuardVerified ? (
-            <>
-              <ShieldCheck size={12} color="var(--status-pass-text)" />
-              <span style={{ color: 'var(--status-pass-text)', fontWeight: 600 }}>
-                Scope Guard: Enforcement Active (Dual-Verified)
-              </span>
-            </>
-          ) : scopeGuardStatus === 'NO_ACTIVE_ALLOW_RULE' ? (
-            <>
-              <AlertTriangle size={12} color="#ffb74d" />
-              <span style={{ color: '#ffb74d', fontWeight: 600 }}>
-                Scope Guard: Default-Deny (No Allow Rules)
-              </span>
-            </>
-          ) : (
-            <>
-              <ShieldAlert size={12} color="var(--status-blocked-text)" />
-              <span style={{ color: 'var(--status-blocked-text)', fontWeight: 600 }}>
-                Scope Guard: Unverified (Probe Pending/Offline)
-              </span>
-            </>
-          )}
+          <span className={`wb-mode-chip ${isDemoMode ? 'demo' : 'live'}`}>
+            {isDemoMode ? 'DEMO' : 'LIVE'}
+          </span>
         </div>
 
-        {/* Scope Rules Count */}
-        <div className="wb-statusbar-item">
-          <span>Target Rules:</span>
-          <strong style={{ color: 'var(--text-primary)' }}>{scopeRulesCount}</strong>
-        </div>
+        <ConnectionStatus
+          status={connectionState}
+          lastCheckedAt={lastCheckedAt}
+          onRefresh={onRefreshConnection}
+        />
 
-        {/* Mode Indicator */}
-        <div className="wb-statusbar-item">
-          {isDemoMode ? (
-            <span style={{ color: '#ffb74d', fontWeight: 700 }}>[MODE: DEMO FIXTURE]</span>
-          ) : (
-            <span style={{ color: 'var(--status-pass-text)' }}>[MODE: LIVE API]</span>
+        <div className="wb-statusbar-item wb-statusbar-assessment">
+          <span>Assessment:</span>
+          <strong title={assessmentName || undefined}>
+            {assessmentId || 'No assessment'}
+          </strong>
+          {assessmentName && (
+            <span className="wb-statusbar-muted">({assessmentName})</span>
           )}
         </div>
       </div>
 
       <div className="wb-statusbar-group">
-        {/* Session In-Memory Advisory */}
-        <div className="wb-statusbar-item" style={{ color: 'var(--text-muted)' }}>
-          <Database size={11} />
-          <span>Local In-Memory Repository</span>
+        <div
+          className="wb-statusbar-item"
+          style={{ color: enforcementTone }}
+          title={
+            enforcementReason ||
+            'Enforcement status is separate from backend connectivity.'
+          }
+        >
+          <EnforcementIcon status={enforcementStatus} />
+          <span>Scope Guard: {enforcementText}</span>
         </div>
 
-        {/* Connection Status */}
-        <ConnectionStatus
-          status={connectionState}
-          onRefresh={onRefreshConnection}
-        />
+        <div className="wb-statusbar-item">
+          <span>Scope rules:</span>
+          <strong>{scopeRulesCount === null ? '—' : scopeRulesCount}</strong>
+        </div>
+
+        <div
+          className="wb-statusbar-item"
+          style={{ color: 'var(--text-muted)' }}
+          title={
+            engagementName
+              ? `Engagement: ${engagementName}. Data is stored in memory and resets when the backend restarts.`
+              : 'Data is stored in memory and resets when the backend restarts.'
+          }
+        >
+          <Database size={11} />
+          <span>Session data: in-memory (reset on restart)</span>
+        </div>
+
+        <div className="wb-statusbar-item wb-statusbar-muted">
+          <span>
+            {lastCheckedAt
+              ? `Checked ${lastCheckedAt.toLocaleTimeString()}`
+              : 'Not checked yet'}
+          </span>
+        </div>
       </div>
     </footer>
   );

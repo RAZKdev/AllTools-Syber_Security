@@ -1,14 +1,14 @@
 import React from 'react';
-import { ShieldCheck, ShieldAlert, AlertTriangle, ShieldOff } from 'lucide-react';
-import { ScopeGuardVerificationStatus } from '@/services/api';
+import { ShieldCheck, ShieldAlert, AlertTriangle, ShieldOff, CircleSlash } from 'lucide-react';
+import { EnforcementStatus } from '@/services/api';
 
 interface ScopeIndicatorProps {
   decision?: 'ALLOW' | 'BLOCK';
   target?: string;
   reason?: string;
   matchedRuleId?: string;
-  isProbeVerified?: boolean;
-  probeStatus?: ScopeGuardVerificationStatus;
+  evaluatedAt?: string;
+  probeStatus?: EnforcementStatus;
   probeReason?: string;
   isChecking?: boolean;
 }
@@ -18,28 +18,27 @@ export const ScopeIndicator: React.FC<ScopeIndicatorProps> = ({
   target,
   reason,
   matchedRuleId,
-  isProbeVerified,
+  evaluatedAt,
   probeStatus,
   probeReason,
   isChecking,
 }) => {
-  // If rendering a full evaluation result for a tested target
   if (decision) {
     const isAllow = decision === 'ALLOW';
     return (
       <div
+        className="wb-scope-result"
         style={{
-          marginTop: '12px',
-          padding: '12px 14px',
-          borderRadius: '4px',
-          backgroundColor: isAllow ? 'var(--status-pass-bg)' : 'var(--status-blocked-bg)',
-          border: `1px solid ${isAllow ? 'var(--status-pass-border)' : 'var(--status-blocked-border)'}`,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '6px',
+          backgroundColor: isAllow
+            ? 'var(--status-pass-bg)'
+            : 'var(--status-blocked-bg)',
+          border: `1px solid ${
+            isAllow ? 'var(--status-pass-border)' : 'var(--status-blocked-border)'
+          }`,
         }}
+        role="status"
       >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div className="wb-scope-result-head">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             {isAllow ? (
               <ShieldCheck size={16} color="var(--status-pass-text)" />
@@ -51,135 +50,110 @@ export const ScopeIndicator: React.FC<ScopeIndicatorProps> = ({
                 fontFamily: 'var(--font-mono)',
                 fontWeight: 700,
                 fontSize: '12px',
-                color: isAllow ? 'var(--status-pass-text)' : 'var(--status-blocked-text)',
+                color: isAllow
+                  ? 'var(--status-pass-text)'
+                  : 'var(--status-blocked-text)',
               }}
             >
-              SCOPE DECISION: {decision}
+              BACKEND DECISION: {decision}
             </span>
           </div>
           {matchedRuleId && (
-            <span
-              style={{
-                fontSize: '11px',
-                fontFamily: 'var(--font-mono)',
-                color: 'var(--text-secondary)',
-              }}
-            >
+            <span className="wb-scope-result-meta">
               Rule: <strong>{matchedRuleId}</strong>
             </span>
           )}
         </div>
 
         {target && (
-          <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+          <div className="wb-scope-result-meta">
             Target: <code style={{ color: 'var(--text-primary)' }}>{target}</code>
           </div>
         )}
 
         {reason && (
-          <div
-            style={{
-              fontSize: '11px',
-              color: 'var(--text-primary)',
-              lineHeight: 1.4,
-              marginTop: '2px',
-            }}
-          >
-            {reason}
+          <div className="wb-scope-result-reason">{reason}</div>
+        )}
+
+        {evaluatedAt && (
+          <div className="wb-scope-result-meta">
+            Evaluated: {new Date(evaluatedAt).toLocaleString()} (backend timestamp)
           </div>
         )}
       </div>
     );
   }
 
-  // If rendering status badge (Probe verified)
   if (isChecking) {
     return (
-      <div
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '6px',
-          padding: '2px 8px',
-          borderRadius: '3px',
-          background: 'var(--bg-surface-elevated)',
-          border: '1px solid var(--border-default)',
-          fontSize: '11px',
-          color: 'var(--status-warn-text)',
-        }}
-      >
+      <span className="wb-enforcement-inline" style={{ color: 'var(--status-warn-text)' }}>
         <AlertTriangle size={12} />
-        <span>Verifying Scope Guard Probe...</span>
-      </div>
+        Checking enforcement…
+      </span>
     );
   }
 
-  const activeVerified = probeStatus ? probeStatus === 'VERIFIED_ACTIVE' : isProbeVerified;
-
-  if (activeVerified) {
-    return (
-      <div
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '6px',
-          padding: '2px 8px',
-          borderRadius: '3px',
-          background: 'var(--status-pass-bg)',
-          border: '1px solid var(--status-pass-border)',
-          fontSize: '11px',
-          color: 'var(--status-pass-text)',
-          fontWeight: 700,
-        }}
-        title={probeReason || 'Backend Scope Guard dual-assertion confirmed: In-scope target allowed & default-deny boundary active'}
-      >
-        <ShieldCheck size={13} />
-        <span>SCOPE GUARD: ACTIVE (Dual-Verified)</span>
-      </div>
-    );
+  switch (probeStatus) {
+    case 'default_deny_verified':
+      return (
+        <span
+          className="wb-enforcement-inline"
+          style={{ color: 'var(--status-pass-text)' }}
+          title={
+            probeReason ||
+            'Backend returned BLOCK for the out-of-scope sentinel target.'
+          }
+        >
+          <ShieldCheck size={13} />
+          Default-deny verified
+        </span>
+      );
+    case 'probe_allowed':
+      return (
+        <span
+          className="wb-enforcement-inline"
+          style={{ color: 'var(--status-blocked-text)' }}
+          title={
+            probeReason ||
+            'The sentinel target was allowed; enforcement cannot be claimed.'
+          }
+        >
+          <ShieldAlert size={13} />
+          Enforcement unverified
+        </span>
+      );
+    case 'unavailable':
+      return (
+        <span
+          className="wb-enforcement-inline"
+          style={{ color: 'var(--status-blocked-text)' }}
+          title={probeReason || 'Enforcement probe could not reach the backend.'}
+        >
+          <ShieldOff size={13} />
+          Enforcement unavailable
+        </span>
+      );
+    case 'demo':
+      return (
+        <span
+          className="wb-enforcement-inline"
+          style={{ color: 'var(--text-muted)' }}
+          title="Demo Mode does not run enforcement probes."
+        >
+          <CircleSlash size={13} />
+          Enforcement: n/a (demo)
+        </span>
+      );
+    default:
+      return (
+        <span
+          className="wb-enforcement-inline"
+          style={{ color: 'var(--text-muted)' }}
+          title={probeReason || 'No enforcement probe has run for this assessment.'}
+        >
+          <CircleSlash size={13} />
+          Enforcement not checked
+        </span>
+      );
   }
-
-  if (probeStatus === 'NO_ACTIVE_ALLOW_RULE') {
-    return (
-      <div
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '6px',
-          padding: '2px 8px',
-          borderRadius: '3px',
-          background: 'rgba(255, 152, 0, 0.12)',
-          border: '1px solid #ff9800',
-          fontSize: '11px',
-          color: '#ffb74d',
-          fontWeight: 600,
-        }}
-        title={probeReason || 'Default-deny active, but no active in-scope rule found to verify ALLOW path'}
-      >
-        <AlertTriangle size={13} />
-        <span>SCOPE GUARD: DEFAULT-DENY (No Allow Rules)</span>
-      </div>
-    );
-  }
-
-  return (
-    <div
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: '6px',
-        padding: '2px 8px',
-        borderRadius: '3px',
-        background: 'var(--status-blocked-bg)',
-        border: '1px solid var(--status-blocked-border)',
-        fontSize: '11px',
-        color: 'var(--status-blocked-text)',
-        fontWeight: 600,
-      }}
-      title={probeReason || 'Scope Guard enforcement unverified: Backend offline or probe failed'}
-    >
-      <ShieldOff size={13} />
-      <span>SCOPE GUARD: UNVERIFIED</span>
-    </div>
-  );
 };

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   PlayCircle,
   AlertTriangle,
@@ -6,6 +6,8 @@ import {
   Target,
   RefreshCw,
   ExternalLink,
+  ShieldCheck,
+  Database,
 } from 'lucide-react';
 import {
   api,
@@ -13,6 +15,8 @@ import {
   CheckExecutionRecord,
   SecurityRuleMetadata,
   ScopeItem,
+  Assessment,
+  Engagement,
 } from '@/services/api';
 import {
   DEMO_FINDINGS,
@@ -27,19 +31,50 @@ import { StatePanel } from '@/components/StatePanel';
 import { DemoBadge } from '@/components/DemoBadge';
 import { DetailPanel, DetailTab } from '@/components/DetailPanel';
 import { KeyValue } from '@/components/KeyValue';
+import { PageHeader } from '@/components/PageHeader';
+import { ContextSidebar } from '@/components/ContextSidebar';
 import { ActiveTab } from '@/components/AppShell';
+import { BackendConnectionState } from '@/components/ConnectionStatus';
 
 interface DashboardPageProps {
   isDemoMode: boolean;
+  assessmentId: string | null;
+  engagementId: string | null;
+  engagement: Engagement | null;
+  assessment: Assessment | null;
+  connectionState: BackendConnectionState;
+  contextLoading?: boolean;
+  refreshToken?: number;
   onNavigateTab: (tab: ActiveTab) => void;
+}
+
+interface AreaErrors {
+  rules?: string;
+  findings?: string;
+  executions?: string;
+  scope?: string;
+}
+
+function isExpired(expiresAt?: string): boolean {
+  if (!expiresAt) return false;
+  const timestamp = Date.parse(expiresAt);
+  return Number.isFinite(timestamp) && timestamp <= Date.now();
 }
 
 export const DashboardPage: React.FC<DashboardPageProps> = ({
   isDemoMode,
+  assessmentId,
+  engagementId,
+  engagement,
+  assessment,
+  connectionState,
+  contextLoading = false,
+  refreshToken = 0,
   onNavigateTab,
 }) => {
   const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
+  const [fatalError, setFatalError] = useState<string | null>(null);
+  const [areaErrors, setAreaErrors] = useState<AreaErrors>({});
 
   const [rules, setRules] = useState<SecurityRuleMetadata[]>([]);
   const [findings, setFindings] = useState<Finding[]>([]);
@@ -47,12 +82,20 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   const [scopeItems, setScopeItems] = useState<ScopeItem[]>([]);
   const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null);
 
-  const loadData = async () => {
+  const isOffline =
+    connectionState === 'offline' || connectionState === 'api_error';
+
+  const loadData = useCallback(async () => {
     setLoading(true);
-    setError(null);
+    setFatalError(null);
+    setAreaErrors({});
+    setRules([]);
+    setFindings([]);
+    setExecutions([]);
+    setScopeItems([]);
+    setSelectedFinding(null);
 
     if (isDemoMode) {
-      // Load strictly from demo fixtures
       setRules(DEMO_RULES);
       setFindings(DEMO_FINDINGS);
       setExecutions(DEMO_CHECK_EXECUTIONS);
@@ -62,50 +105,61 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
       return;
     }
 
-    try {
-      // In Live Mode: strictly call real backend APIs
-      const [rulesRes, findingsRes, execsRes, scopeRes] = await Promise.all([
-        api.getRules().catch(() => []),
-        api.getFindings().catch(() => []),
-        api.getExecutions().catch(() => []),
-        api.getScopeItems().catch(() => []),
-      ]);
-
-      setRules(rulesRes);
-      setFindings(findingsRes);
-      setExecutions(execsRes);
-      setScopeItems(scopeRes);
-      setSelectedFinding(findingsRes.length > 0 ? findingsRes[0] : null);
-    } catch (err: any) {
-      setError(err?.message || 'Failed to fetch operational data from backend');
-    } finally {
+    if (!assessmentId || !engagementId) {
       setLoading(false);
+      return;
     }
-  };
+
+    const results = await Promise.allSettled([
+      api.getRules(),
+      api.getFindings(assessmentId),
+      api.getExecutions(assessmentId),
+      api.getScopeItems(engagementId),
+    ]);
+
+    const nextErrors: AreaErrors = {};
+    const [rulesResult, findingsResult, executionsResult, scopeResult] = results;
+
+    if (rulesResult.status === 'fulfilled') {
+      setRules(rulesResult.value);
+    } else {
+      nextErrors.rules =
+        rulesResult.reason?.message || 'Rule catalog request failed.';
+    }
+
+    if (findingsResult.status === 'fulfilled') {
+      setFindings(findingsResult.value);
+      setSelectedFinding(findingsResult.value[0] || null);
+    } else {
+      nextErrors.findings =
+        findingsResult.reason?.message || 'Findings request failed.';
+    }
+
+    if (executionsResult.status === 'fulfilled') {
+      setExecutions(executionsResult.value);
+    } else {
+      nextErrors.executions =
+        executionsResult.reason?.message || 'Executions request failed.';
+    }
+
+    if (scopeResult.status === 'fulfilled') {
+      setScopeItems(scopeResult.value);
+    } else {
+      nextErrors.scope =
+        scopeResult.reason?.message || 'Scope request failed.';
+    }
+
+    setAreaErrors(nextErrors);
+    if (Object.keys(nextErrors).length === results.length) {
+      setFatalError('All dashboard API requests failed. No data is being shown.');
+    }
+    setLoading(false);
+  }, [assessmentId, engagementId, isDemoMode]);
 
   useEffect(() => {
     loadData();
-  }, [isDemoMode]);
+  }, [loadData, refreshToken]);
 
-  // If loading in live mode
-  if (loading && !isDemoMode) {
-    return <StatePanel kind="loading" title="Connecting to Workbench API..." />;
-  }
-
-  // If live mode failed
-  if (error && !isDemoMode) {
-    return (
-      <StatePanel
-        kind="offline"
-        title="Workbench Backend Offline"
-        description="Could not load dashboard telemetry from local API. Ensure the backend is running at http://127.0.0.1:8000."
-        errorMessage={error}
-        onRetry={loadData}
-      />
-    );
-  }
-
-  // Issue Activity Columns (Burp Suite Style)
   const findingColumns: DataTableColumn<Finding>[] = [
     {
       key: 'severity',
@@ -115,7 +169,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     },
     {
       key: 'title',
-      label: 'Issue Type / Title',
+      label: 'Issue type / title',
       render: (row) => (
         <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
           {row.title}
@@ -135,29 +189,24 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     {
       key: 'status',
       label: 'Status',
-      width: '110px',
+      width: '115px',
       render: (row) => <StatusBadge status={row.status} size="sm" />,
     },
     {
       key: 'assetId',
       label: 'Asset',
       width: '100px',
-      render: (row) => (
-        <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
-          {row.assetId}
-        </span>
-      ),
+      render: (row) => <span className="wb-mono-muted">{row.assetId}</span>,
     },
   ];
 
-  // Event Log Columns (Recent executions)
   const executionColumns: DataTableColumn<CheckExecutionRecord>[] = [
     {
       key: 'executedAt',
       label: 'Time',
-      width: '120px',
+      width: '115px',
       render: (row) => (
-        <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+        <span className="wb-mono-muted">
           {new Date(row.executedAt).toLocaleTimeString()}
         </span>
       ),
@@ -165,7 +214,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     {
       key: 'id',
       label: 'Execution ID',
-      width: '110px',
+      width: '115px',
       render: (row) => (
         <code style={{ color: 'var(--text-primary)' }}>{row.id}</code>
       ),
@@ -187,8 +236,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     },
     {
       key: 'scopeDecision',
-      label: 'Scope Guard',
-      width: '95px',
+      label: 'Scope',
+      width: '85px',
       render: (row) => (
         <span
           className="wb-chip"
@@ -215,12 +264,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     {
       key: 'status',
       label: 'Status',
-      width: '100px',
+      width: '145px',
       render: (row) => <StatusBadge status={row.status} size="sm" />,
     },
   ];
 
-  // Advisory tabs for selected finding
   const inspectorTabs: DetailTab[] = selectedFinding
     ? [
         {
@@ -239,77 +287,28 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                 >
                   {selectedFinding.title}
                 </h3>
-                <div style={{ display: 'flex', gap: '10px', fontSize: '11px', color: 'var(--text-secondary)' }}>
-                  <span>Severity: <strong style={{ color: 'var(--text-primary)' }}>{selectedFinding.severity.toUpperCase()}</strong></span>
-                  <span>Confidence: <strong style={{ color: 'var(--text-primary)' }}>{selectedFinding.confidence.toUpperCase()}</strong></span>
-                  {selectedFinding.cwe && <span>CWE: <code style={{ color: 'var(--accent)' }}>{selectedFinding.cwe}</code></span>}
+                <div className="wb-page-meta">
+                  <span>Severity: <strong>{selectedFinding.severity.toUpperCase()}</strong></span>
+                  <span>Confidence: <strong>{selectedFinding.confidence.toUpperCase()}</strong></span>
+                  {selectedFinding.cwe && (
+                    <span>CWE: <code style={{ color: 'var(--accent)' }}>{selectedFinding.cwe}</code></span>
+                  )}
                 </div>
               </div>
-
               <div>
-                <div
-                  style={{
-                    fontSize: '10px',
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    color: 'var(--text-muted)',
-                    marginBottom: '4px',
-                  }}
-                >
-                  Issue Detail & Context
-                </div>
-                <div style={{ fontSize: '12px', color: 'var(--text-primary)', lineHeight: 1.5 }}>
+                <div className="wb-section-label">Description</div>
+                <div className="wb-detail-text">
                   {selectedFinding.description || 'No detailed description provided.'}
                 </div>
               </div>
-
               {selectedFinding.impact && (
                 <div>
-                  <div
-                    style={{
-                      fontSize: '10px',
-                      fontWeight: 700,
-                      textTransform: 'uppercase',
-                      color: 'var(--sev-high-text)',
-                      marginBottom: '4px',
-                    }}
-                  >
-                    Technical Impact
+                  <div className="wb-section-label" style={{ color: 'var(--sev-high-text)' }}>
+                    Technical impact
                   </div>
-                  <div style={{ fontSize: '12px', color: 'var(--text-primary)', lineHeight: 1.5 }}>
-                    {selectedFinding.impact}
-                  </div>
+                  <div className="wb-detail-text">{selectedFinding.impact}</div>
                 </div>
               )}
-            </div>
-          ),
-        },
-        {
-          id: 'remediation',
-          label: 'Remediation',
-          content: (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div
-                style={{
-                  fontSize: '10px',
-                  fontWeight: 700,
-                  textTransform: 'uppercase',
-                  color: 'var(--accent)',
-                }}
-              >
-                Defensive Guidance
-              </div>
-              <pre
-                style={{
-                  fontSize: '11px',
-                  fontFamily: 'inherit',
-                  color: 'var(--text-primary)',
-                  lineHeight: 1.6,
-                  whiteSpace: 'pre-wrap',
-                }}
-              >
-                {selectedFinding.recommendation || 'No remediation guidance recorded.'}
-              </pre>
             </div>
           ),
         },
@@ -320,13 +319,13 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             <KeyValue
               items={[
                 { key: 'Finding ID', value: selectedFinding.id },
-                { key: 'Assessment ID', value: selectedFinding.assessmentId },
+                { key: 'Assessment', value: selectedFinding.assessmentId },
                 { key: 'Asset ID', value: selectedFinding.assetId },
-                { key: 'Rule ID', value: selectedFinding.ruleId || '—' },
-                { key: 'Classification', value: selectedFinding.cwe || 'None' },
+                { key: 'Rule', value: selectedFinding.ruleId || '—' },
                 { key: 'Status', value: selectedFinding.status },
+                { key: 'Source', value: isDemoMode ? 'DEMO fixture' : 'Backend API' },
                 {
-                  key: 'Discovered At',
+                  key: 'Discovered (UTC)',
                   value: new Date(selectedFinding.createdAt).toUTCString(),
                 },
               ]}
@@ -339,206 +338,315 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           id: 'none',
           label: 'Advisory',
           content: (
-            <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}>
-              Select an issue from Issue Activity to view defensive advisory details.
+            <div className="wb-no-selection">
+              Select an issue from Issue Activity to view its advisory.
             </div>
           ),
         },
       ];
 
-  const inScopeCount = scopeItems.filter((s) => s.inScope).length;
-  const excludedCount = scopeItems.filter((s) => !s.inScope).length;
-  const blockedExecCount = executions.filter((e) => e.scopeDecision === 'BLOCK').length;
+  const activeScopeCount = scopeItems.filter(
+    (item) => item.inScope && !isExpired(item.expiresAt),
+  ).length;
+
+  const areaState = (
+    areaError: string | undefined,
+    content: React.ReactNode,
+  ) => {
+    if (areaError) {
+      return (
+        <StatePanel
+          kind={isOffline ? 'offline' : 'error'}
+          title={isOffline ? 'Backend unreachable' : 'API request failed'}
+          description="This area shows no data because its request failed."
+          errorMessage={areaError}
+          onRetry={loadData}
+        />
+      );
+    }
+    return content;
+  };
+
+  if (contextLoading && !isDemoMode) {
+    return <StatePanel kind="loading" title="Loading workspace context…" />;
+  }
+
+  if (!assessmentId && !isDemoMode) {
+    return (
+      <StatePanel
+        kind="empty"
+        title="No assessment available"
+        description="The dashboard needs an active assessment from the backend. Create or select one to continue."
+      />
+    );
+  }
+
+  if (loading) {
+    return <StatePanel kind="loading" title="Loading dashboard telemetry…" />;
+  }
+
+  if (fatalError) {
+    return (
+      <StatePanel
+        kind={isOffline ? 'offline' : 'error'}
+        title={isOffline ? 'Dashboard backend unreachable' : 'Dashboard request failed'}
+        description="No dashboard data is shown because the backend requests did not succeed."
+        errorMessage={fatalError}
+        onRetry={loadData}
+      />
+    );
+  }
 
   return (
-    <div className="wb-quad-grid">
-      {/* =========================================================================
-          Quadrant 1 (Top Left): Tasks & Defensive Modules
-          ========================================================================= */}
-      <div className="wb-panel">
-        <div className="wb-panel-header">
-          <div className="wb-panel-title">
-            <PlayCircle size={14} color="var(--accent)" />
-            <span>Defensive Security Modules & Scope Guard</span>
-            {isDemoMode && <DemoBadge />}
-          </div>
-          <div style={{ display: 'flex', gap: '6px' }}>
-            <button
-              onClick={() => onNavigateTab('executions')}
-              className="wb-btn wb-btn-primary wb-btn-sm"
-              title="Launch check execution wizard"
-            >
-              <PlayCircle size={12} />
-              Execute Check
-            </button>
-            <button
-              onClick={() => onNavigateTab('scope')}
-              className="wb-btn wb-btn-sm"
-              title="Configure authorized target scope"
-            >
-              <Target size={12} />
-              Scope
-            </button>
-          </div>
-        </div>
-
-        <div className="wb-toolbar">
-          <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-            Modules: <strong style={{ color: 'var(--text-primary)' }}>{rules.length} Active</strong>
+    <div className="wb-page-layout">
+      <ContextSidebar
+        title="Assessment context"
+        footer={
+          <span>
+            Session data is in-memory and resets when the backend restarts.
           </span>
-          <span style={{ color: 'var(--border-strong)' }}>|</span>
-          <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-            Scope Rules: <strong style={{ color: 'var(--status-pass-text)' }}>{inScopeCount} In-Scope</strong> /{' '}
-            <strong style={{ color: 'var(--status-blocked-text)' }}>{excludedCount} Excluded</strong>
-          </span>
-          <span style={{ color: 'var(--border-strong)' }}>|</span>
-          <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-            Blocks: <strong style={{ color: 'var(--status-blocked-text)' }}>{blockedExecCount} Prevented</strong>
-          </span>
-        </div>
-
-        <div className="wb-panel-body">
-          <div style={{ padding: '8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            {rules.map((rule) => (
-              <div
-                key={rule.ruleId}
-                onClick={() => onNavigateTab('executions')}
-                style={{
-                  padding: '7px 10px',
-                  background: 'var(--bg-table-zebra)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: '3px',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: '8px',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-                  <code style={{ color: 'var(--accent)', fontWeight: 700, fontSize: '11px' }}>
-                    {rule.ruleId}
-                  </code>
-                  <span
-                    style={{
-                      fontSize: '11px',
-                      color: 'var(--text-primary)',
-                      fontWeight: 600,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {rule.title}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
-                  <span
-                    style={{
-                      fontSize: '10px',
-                      color: 'var(--text-muted)',
-                      fontFamily: 'var(--font-mono)',
-                    }}
-                  >
-                    {rule.cwe}
-                  </span>
-                  <span className="wb-chip" style={{ background: 'var(--bg-surface-elevated)' }}>
-                    {rule.category}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* =========================================================================
-          Quadrant 2 (Top Right): Issue Activity (Findings Table)
-          ========================================================================= */}
-      <div className="wb-panel">
-        <div className="wb-panel-header">
-          <div className="wb-panel-title">
-            <AlertTriangle size={14} color="var(--sev-high-text)" />
-            <span>Issue Activity</span>
-            <span className="wb-panel-count">{findings.length}</span>
-            {isDemoMode && <DemoBadge />}
-          </div>
-          <button
-            onClick={() => onNavigateTab('findings')}
-            className="wb-btn wb-btn-sm"
-            title="Open comprehensive findings & evidence review"
-          >
-            <span>View All</span>
-            <ExternalLink size={10} />
-          </button>
-        </div>
-
-        <div className="wb-panel-body">
-          <DataTable
-            columns={findingColumns}
-            data={findings}
-            keyExtractor={(row) => row.id}
-            selectedId={selectedFinding?.id}
-            onSelectRow={(row) => setSelectedFinding(row)}
-            emptyMessage="No vulnerability findings recorded. Run defensive checks against authorized targets."
+        }
+      >
+        <div className="wb-context-section">
+          <div className="wb-section-label">Workspace</div>
+          <KeyValue
+            items={[
+              { key: 'Engagement', value: engagement?.name || 'No engagement' },
+              { key: 'Assessment', value: assessment?.name || 'No assessment' },
+              { key: 'Assessor', value: engagement?.assessor || '—' },
+              { key: 'Status', value: assessment?.status || '—' },
+              { key: 'Source', value: isDemoMode ? 'DEMO fixture' : 'Backend API' },
+            ]}
           />
         </div>
-      </div>
 
-      {/* =========================================================================
-          Quadrant 3 (Bottom Left): Event Log & Audit Trail
-          ========================================================================= */}
-      <div className="wb-panel">
-        <div className="wb-panel-header">
-          <div className="wb-panel-title">
-            <FileText size={14} color="var(--text-secondary)" />
-            <span>Event Log / Execution Trail</span>
-            <span className="wb-panel-count">{executions.length}</span>
-            {isDemoMode && <DemoBadge />}
+        <div className="wb-context-section">
+          <div className="wb-section-label">Workflow</div>
+          <ol className="wb-workflow-list">
+            <li>Engagement</li>
+            <li>Scope</li>
+            <li>Assessment</li>
+            <li>Check</li>
+            <li>Finding</li>
+            <li>Evidence</li>
+            <li>Report</li>
+          </ol>
+        </div>
+
+        <div className="wb-context-section">
+          <div className="wb-section-label">Session note</div>
+          <div className="wb-context-note wb-context-note-row">
+            <Database size={12} />
+            <span>In-memory only. Do not treat as permanent storage.</span>
           </div>
-          <button
-            onClick={loadData}
-            className="wb-btn wb-btn-sm"
-            title="Refresh event log from backend"
-          >
-            <RefreshCw size={10} />
-            Refresh
-          </button>
         </div>
+      </ContextSidebar>
 
-        <div className="wb-panel-body">
-          <DataTable
-            columns={executionColumns}
-            data={executions}
-            keyExtractor={(row) => row.id}
-            emptyMessage="No execution events logged in current session. Execute a check from the top-left panel."
-          />
-        </div>
-      </div>
-
-      {/* =========================================================================
-          Quadrant 4 (Bottom Right): Advisory / Detail Inspector
-          ========================================================================= */}
-      <div style={{ height: '100%', overflow: 'hidden' }}>
-        <DetailPanel
-          title={
-            selectedFinding
-              ? `Advisory Inspector: ${selectedFinding.id}`
-              : 'Advisory Inspector'
+      <div className="wb-page-main">
+        <PageHeader
+          title="Dashboard"
+          description="Assessment context and defensive workbench entry points, backed by the local API."
+          isDemoMode={isDemoMode}
+          meta={
+            <>
+              <span>
+                Assessment: <strong>{assessmentId || 'No assessment'}</strong>
+              </span>
+              <span>{assessment?.name || 'No assessment name'}</span>
+              <span>{engagement?.name || 'No engagement'}</span>
+            </>
           }
-          tabs={inspectorTabs}
           actions={
-            selectedFinding && (
+            <>
               <button
-                onClick={() => onNavigateTab('findings')}
+                type="button"
+                onClick={() => onNavigateTab('scope')}
                 className="wb-btn wb-btn-sm"
               >
-                <span>Full Evidence</span>
-                <ExternalLink size={10} />
+                <Target size={12} /> Review scope
               </button>
-            )
+              <button
+                type="button"
+                onClick={() => onNavigateTab('executions')}
+                className="wb-btn wb-btn-primary wb-btn-sm"
+              >
+                <PlayCircle size={12} /> Run check
+              </button>
+            </>
           }
         />
+
+        <div className="wb-page-body wb-dashboard-body">
+          <div className="wb-metric-strip">
+            {[
+              {
+                label: 'Scope rules (active)',
+                value: areaErrors.scope ? '—' : activeScopeCount,
+                area: 'scope',
+              },
+              {
+                label: 'Findings',
+                value: areaErrors.findings ? '—' : findings.length,
+                area: 'findings',
+              },
+              {
+                label: 'Session executions',
+                value: areaErrors.executions ? '—' : executions.length,
+                area: 'executions',
+              },
+              {
+                label: 'Rules available',
+                value: areaErrors.rules ? '—' : rules.length,
+                area: 'rules',
+              },
+            ].map((metric) => (
+              <div key={metric.label} className="wb-metric">
+                <span className="wb-metric-label">{metric.label}</span>
+                <span className="wb-metric-value">{metric.value}</span>
+                <span className="wb-metric-source">
+                  {isDemoMode ? 'DEMO' : areaErrors[metric.area as keyof AreaErrors] ? 'ERROR' : 'API'}
+                </span>
+              </div>
+            ))}
+            <div className="wb-metric-note">
+              <ShieldCheck size={12} />
+              Metrics are counts from the current source only.
+            </div>
+          </div>
+
+          <div className="wb-quad-grid">
+            <div className="wb-panel">
+              <div className="wb-panel-header">
+                <div className="wb-panel-title">
+                  <PlayCircle size={14} color="var(--accent)" />
+                  <span>Defensive modules</span>
+                  <span className="wb-panel-count">{rules.length}</span>
+                  {isDemoMode && <DemoBadge />}
+                </div>
+                <span className="wb-toolbar-hint">GET /executions/rules</span>
+              </div>
+              <div className="wb-panel-body">
+                {areaState(
+                  areaErrors.rules,
+                  rules.length === 0 ? (
+                    <StatePanel
+                      kind="empty"
+                      title="No rules returned"
+                      description="The backend did not return any defensive security rules."
+                    />
+                  ) : (
+                    <div className="wb-rule-list">
+                      {rules.map((rule) => (
+                        <button
+                          key={rule.ruleId}
+                          type="button"
+                          className="wb-rule-row"
+                          onClick={() => onNavigateTab('executions')}
+                          title={`Open Check Executions for ${rule.ruleId}`}
+                        >
+                          <code className="wb-rule-id">{rule.ruleId}</code>
+                          <span className="wb-rule-title">{rule.title}</span>
+                          <span className="wb-rule-meta">{rule.category}</span>
+                          <code className="wb-rule-cwe">{rule.cwe}</code>
+                        </button>
+                      ))}
+                    </div>
+                  ),
+                )}
+              </div>
+            </div>
+
+            <div className="wb-panel">
+              <div className="wb-panel-header">
+                <div className="wb-panel-title">
+                  <AlertTriangle size={14} color="var(--sev-high-text)" />
+                  <span>Issue activity</span>
+                  <span className="wb-panel-count">{findings.length}</span>
+                  {isDemoMode && <DemoBadge />}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onNavigateTab('findings')}
+                  className="wb-btn wb-btn-sm"
+                >
+                  <span>View all</span>
+                  <ExternalLink size={10} />
+                </button>
+              </div>
+              <div className="wb-panel-body">
+                {areaState(
+                  areaErrors.findings,
+                  <DataTable
+                    columns={findingColumns}
+                    data={findings}
+                    keyExtractor={(row) => row.id}
+                    selectedId={selectedFinding?.id}
+                    onSelectRow={(row) => setSelectedFinding(row)}
+                    emptyMessage="No vulnerability findings recorded for this assessment."
+                  />,
+                )}
+              </div>
+            </div>
+
+            <div className="wb-panel">
+              <div className="wb-panel-header">
+                <div className="wb-panel-title">
+                  <FileText size={14} color="var(--text-secondary)" />
+                  <span>Recent executions</span>
+                  <span className="wb-panel-count">{executions.length}</span>
+                  {isDemoMode && <DemoBadge />}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span className="wb-toolbar-hint">Session only</span>
+                  <button
+                    type="button"
+                    onClick={loadData}
+                    className="wb-btn wb-btn-sm"
+                    title="Refresh dashboard data"
+                  >
+                    <RefreshCw size={10} /> Refresh
+                  </button>
+                </div>
+              </div>
+              <div className="wb-panel-body">
+                {areaState(
+                  areaErrors.executions,
+                  <DataTable
+                    columns={executionColumns}
+                    data={executions}
+                    keyExtractor={(row) => row.id}
+                    emptyMessage="No execution records in this backend session."
+                  />,
+                )}
+              </div>
+            </div>
+
+            <div className="wb-panel" style={{ overflow: 'hidden' }}>
+              <DetailPanel
+                title={
+                  selectedFinding
+                    ? `Advisory: ${selectedFinding.id}`
+                    : 'Advisory inspector'
+                }
+                tabs={inspectorTabs}
+                actions={
+                  selectedFinding ? (
+                    <button
+                      type="button"
+                      onClick={() => onNavigateTab('findings')}
+                      className="wb-btn wb-btn-sm"
+                    >
+                      <span>Full evidence</span>
+                      <ExternalLink size={10} />
+                    </button>
+                  ) : isDemoMode ? (
+                    <DemoBadge />
+                  ) : undefined
+                }
+              />
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -1,16 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   Search,
-  Filter,
   RefreshCw,
   FileCode,
 } from 'lucide-react';
-import {
-  api,
-  Finding,
-  Evidence,
-} from '@/services/api';
+import { api, Finding, Evidence } from '@/services/api';
 import { DEMO_FINDINGS, DEMO_EVIDENCE } from '@/demo/fixtures';
 import { DataTable, DataTableColumn } from '@/components/DataTable';
 import { SeverityBadge } from '@/components/SeverityBadge';
@@ -20,81 +15,160 @@ import { StatePanel } from '@/components/StatePanel';
 import { DemoBadge } from '@/components/DemoBadge';
 import { KeyValue } from '@/components/KeyValue';
 import { FilterTabs } from '@/components/FilterTabs';
+import { PageHeader } from '@/components/PageHeader';
+import { ContextSidebar } from '@/components/ContextSidebar';
+import { BackendConnectionState } from '@/components/ConnectionStatus';
 
 interface FindingsPageProps {
   isDemoMode: boolean;
+  assessmentId: string | null;
+  connectionState: BackendConnectionState;
+  contextLoading?: boolean;
+  refreshToken?: number;
 }
 
-export const FindingsPage: React.FC<FindingsPageProps> = ({ isDemoMode }) => {
+export const FindingsPage: React.FC<FindingsPageProps> = ({
+  isDemoMode,
+  assessmentId,
+  connectionState,
+  contextLoading = false,
+  refreshToken = 0,
+}) => {
   const [findings, setFindings] = useState<Finding[]>([]);
-  const [evidenceList, setEvidenceList] = useState<Evidence[]>([]);
   const [selectedFinding, setSelectedFinding] = useState<Finding | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Filters
   const [filterSeverity, setFilterSeverity] = useState<string>('all');
+  const [filterStatus, setFilterStatus] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  const loadData = async () => {
+  const [evidence, setEvidence] = useState<Evidence[]>([]);
+  const [evidenceLoading, setEvidenceLoading] = useState<boolean>(false);
+  const [evidenceError, setEvidenceError] = useState<string | null>(null);
+
+  const isOffline =
+    connectionState === 'offline' || connectionState === 'api_error';
+
+  const loadFindings = useCallback(async () => {
     setLoading(true);
     setError(null);
     setSelectedFinding(null);
+    setEvidence([]);
+    setEvidenceError(null);
 
     if (isDemoMode) {
       setFindings(DEMO_FINDINGS);
-      setEvidenceList(DEMO_EVIDENCE);
       setSelectedFinding(DEMO_FINDINGS[0] || null);
       setLoading(false);
       return;
     }
 
-    try {
-      const [fndRes, evdRes] = await Promise.all([
-        api.getFindings().catch(() => []),
-        api.getEvidence().catch(() => []),
-      ]);
+    if (!assessmentId) {
+      setFindings([]);
+      setLoading(false);
+      return;
+    }
 
-      setFindings(fndRes);
-      setEvidenceList(evdRes);
-      setSelectedFinding(fndRes.length > 0 ? fndRes[0] : null);
+    try {
+      const result = await api.getFindings(assessmentId);
+      setFindings(result);
+      setSelectedFinding(result[0] || null);
     } catch (err: any) {
-      setError(err?.message || 'Failed to retrieve findings from backend');
+      setFindings([]);
+      setError(
+        err?.message || 'Failed to retrieve findings from the backend API.',
+      );
     } finally {
       setLoading(false);
     }
-  };
+  }, [assessmentId, isDemoMode]);
 
   useEffect(() => {
-    loadData();
-  }, [isDemoMode]);
+    loadFindings();
+  }, [loadFindings, refreshToken]);
 
-  const filteredFindings = findings.filter((f) => {
-    if (filterSeverity !== 'all' && f.severity !== filterSeverity) {
-      return false;
+  // Evidence is fetched only for the selected finding, with its own state.
+  useEffect(() => {
+    if (!selectedFinding) {
+      setEvidence([]);
+      setEvidenceError(null);
+      setEvidenceLoading(false);
+      return;
     }
+
+    if (isDemoMode) {
+      setEvidence(
+        DEMO_EVIDENCE.filter(
+          (item) => item.findingId === selectedFinding.id,
+        ),
+      );
+      setEvidenceError(null);
+      setEvidenceLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setEvidenceLoading(true);
+    setEvidenceError(null);
+    setEvidence([]);
+    api
+      .getEvidence(assessmentId || undefined, selectedFinding.id)
+      .then((result) => {
+        if (!cancelled) setEvidence(result);
+      })
+      .catch((err: any) => {
+        if (!cancelled) {
+          setEvidence([]);
+          setEvidenceError(
+            err?.message || 'Evidence request failed. No evidence is shown.',
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setEvidenceLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [assessmentId, isDemoMode, selectedFinding]);
+
+  const statuses = useMemo(
+    () => Array.from(new Set(findings.map((finding) => finding.status))).sort(),
+    [findings],
+  );
+
+  const severityCount = (severity: string) =>
+    findings.filter((finding) => finding.severity === severity).length;
+
+  const filteredFindings = findings.filter((finding) => {
+    if (filterSeverity !== 'all') {
+      const target =
+        filterSeverity === 'info' ? 'informational' : filterSeverity;
+      if (finding.severity !== target) return false;
+    }
+    if (filterStatus !== 'all' && finding.status !== filterStatus) return false;
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
+      const query = searchQuery.toLowerCase();
       return (
-        f.title.toLowerCase().includes(q) ||
-        (f.description && f.description.toLowerCase().includes(q)) ||
-        (f.ruleId && f.ruleId.toLowerCase().includes(q)) ||
-        (f.cwe && f.cwe.toLowerCase().includes(q)) ||
-        f.id.toLowerCase().includes(q)
+        finding.title.toLowerCase().includes(query) ||
+        (finding.description || '').toLowerCase().includes(query) ||
+        (finding.ruleId || '').toLowerCase().includes(query) ||
+        (finding.cwe || '').toLowerCase().includes(query) ||
+        (finding.cve || '').toLowerCase().includes(query) ||
+        finding.id.toLowerCase().includes(query) ||
+        finding.assetId.toLowerCase().includes(query)
       );
     }
     return true;
   });
 
-  const matchedEvidence = selectedFinding
-    ? evidenceList.filter((e) => e.findingId === selectedFinding.id)
-    : [];
-
   const columns: DataTableColumn<Finding>[] = [
     {
       key: 'severity',
       label: 'Severity',
-      width: '100px',
+      width: '105px',
       render: (row) => <SeverityBadge severity={row.severity} size="sm" />,
     },
     {
@@ -102,14 +176,12 @@ export const FindingsPage: React.FC<FindingsPageProps> = ({ isDemoMode }) => {
       label: 'Finding ID',
       width: '110px',
       render: (row) => (
-        <code style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
-          {row.id}
-        </code>
+        <code style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{row.id}</code>
       ),
     },
     {
       key: 'title',
-      label: 'Vulnerability Title',
+      label: 'Title',
       render: (row) => (
         <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
           {row.title}
@@ -118,7 +190,7 @@ export const FindingsPage: React.FC<FindingsPageProps> = ({ isDemoMode }) => {
     },
     {
       key: 'ruleId',
-      label: 'Rule Module',
+      label: 'Rule',
       width: '110px',
       render: (row) => (
         <code style={{ color: 'var(--accent)', fontSize: '11px' }}>
@@ -129,31 +201,89 @@ export const FindingsPage: React.FC<FindingsPageProps> = ({ isDemoMode }) => {
     {
       key: 'status',
       label: 'Status',
-      width: '120px',
+      width: '135px',
       render: (row) => <StatusBadge status={row.status} size="sm" />,
     },
     {
       key: 'assetId',
       label: 'Asset',
-      width: '100px',
+      width: '110px',
       render: (row) => (
-        <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
-          {row.assetId}
+        <span className="wb-mono-muted">{row.assetId}</span>
+      ),
+    },
+    {
+      key: 'createdAt',
+      label: 'Discovered',
+      width: '120px',
+      render: (row) => (
+        <span className="wb-mono-muted">
+          {new Date(row.createdAt).toLocaleDateString()}
         </span>
       ),
     },
   ];
 
-  // Multi-tab detail inspector
-  const inspectorTabs: DetailTab[] = selectedFinding
+  const evidenceContent = (() => {
+    if (evidenceLoading) {
+      return (
+        <div className="wb-inline-loading">
+          <RefreshCw size={13} className="spin" /> Loading evidence…
+        </div>
+      );
+    }
+    if (evidenceError) {
+      return (
+        <div className="wb-alert error" role="alert">
+          <strong>Evidence unavailable.</strong> {evidenceError}
+        </div>
+      );
+    }
+    if (evidence.length === 0) {
+      return (
+        <div className="wb-no-selection">
+          <FileCode
+            size={22}
+            style={{ margin: '0 auto 8px auto', display: 'block', opacity: 0.5 }}
+          />
+          No evidence attachments are recorded for this finding.
+        </div>
+      );
+    }
+    return (
+      <div className="wb-evidence-list">
+        {evidence.map((item) => (
+          <div key={item.id} className="wb-evidence-card">
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+              <code style={{ fontWeight: 700, color: 'var(--accent)' }}>{item.id}</code>
+              <span className="wb-chip" style={{ background: 'var(--bg-surface-elevated)' }}>
+                {item.type}
+              </span>
+            </div>
+            <KeyValue
+              items={[
+                { key: 'Source', value: item.source || '—' },
+                { key: 'Captured', value: new Date(item.capturedAt).toUTCString() },
+                { key: 'SHA-256', value: item.sha256 },
+                { key: 'Redacted', value: item.redacted ? 'Yes' : 'No' },
+              ]}
+            />
+            {item.notes && <div className="wb-detail-text">{item.notes}</div>}
+          </div>
+        ))}
+      </div>
+    );
+  })();
+
+  const detailTabs: DetailTab[] = selectedFinding
     ? [
         {
           id: 'advisory',
-          label: 'Advisory Overview',
+          label: 'Advisory',
           content: (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '6px' }}>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '6px', flexWrap: 'wrap' }}>
                   <SeverityBadge severity={selectedFinding.severity} />
                   <StatusBadge status={selectedFinding.status} />
                   {selectedFinding.cwe && (
@@ -168,37 +298,18 @@ export const FindingsPage: React.FC<FindingsPageProps> = ({ isDemoMode }) => {
               </div>
 
               <div>
-                <div
-                  style={{
-                    fontSize: '10px',
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    color: 'var(--text-muted)',
-                    marginBottom: '4px',
-                  }}
-                >
-                  Technical Description & Vulnerability Details
-                </div>
-                <div style={{ fontSize: '12px', color: 'var(--text-primary)', lineHeight: 1.6 }}>
+                <div className="wb-section-label">Description</div>
+                <div className="wb-detail-text">
                   {selectedFinding.description || 'No description recorded.'}
                 </div>
               </div>
 
               {selectedFinding.impact && (
-                <div
-                  style={{
-                    padding: '10px 12px',
-                    background: 'var(--sev-high-bg)',
-                    border: '1px solid var(--sev-high-border)',
-                    borderRadius: '4px',
-                  }}
-                >
-                  <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--sev-high-text)', marginBottom: '2px' }}>
-                    Technical Impact
+                <div className="wb-impact-box">
+                  <div className="wb-section-label" style={{ color: 'var(--sev-high-text)' }}>
+                    Technical impact
                   </div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-primary)', lineHeight: 1.5 }}>
-                    {selectedFinding.impact}
-                  </div>
+                  <div className="wb-detail-text">{selectedFinding.impact}</div>
                 </div>
               )}
             </div>
@@ -209,117 +320,41 @@ export const FindingsPage: React.FC<FindingsPageProps> = ({ isDemoMode }) => {
           label: 'Remediation',
           content: (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <div
-                style={{
-                  fontSize: '10px',
-                  fontWeight: 700,
-                  textTransform: 'uppercase',
-                  color: 'var(--accent)',
-                }}
-              >
-                Actionable Remediation Guidance
+              <div className="wb-section-label" style={{ color: 'var(--accent)' }}>
+                Actionable remediation guidance
               </div>
-              <pre
-                style={{
-                  fontSize: '12px',
-                  fontFamily: 'inherit',
-                  color: 'var(--text-primary)',
-                  lineHeight: 1.6,
-                  whiteSpace: 'pre-wrap',
-                  background: 'var(--bg-table-zebra)',
-                  padding: '12px',
-                  border: '1px solid var(--border-default)',
-                  borderRadius: '4px',
-                }}
-              >
-                {selectedFinding.recommendation || 'No specific remediation recommendation provided.'}
+              <pre className="wb-remediation-pre">
+                {selectedFinding.recommendation ||
+                  'No specific remediation recommendation provided.'}
               </pre>
             </div>
           ),
         },
         {
           id: 'evidence',
-          label: `Evidence (${matchedEvidence.length})`,
-          content: (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {matchedEvidence.length > 0 ? (
-                matchedEvidence.map((evd) => (
-                  <div
-                    key={evd.id}
-                    style={{
-                      background: 'var(--bg-table-zebra)',
-                      border: '1px solid var(--border-default)',
-                      padding: '12px',
-                      borderRadius: '4px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '6px',
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <code style={{ fontWeight: 700, color: 'var(--accent)' }}>
-                        {evd.id}
-                      </code>
-                      <span className="wb-chip" style={{ background: 'var(--bg-surface-elevated)' }}>
-                        {evd.type}
-                      </span>
-                    </div>
-
-                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                      Source Target: <code>{evd.source || '—'}</code>
-                    </div>
-
-                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                      SHA-256 Digest:
-                      <code
-                        style={{
-                          display: 'block',
-                          color: 'var(--text-primary)',
-                          background: 'var(--bg-surface)',
-                          padding: '4px 6px',
-                          marginTop: '2px',
-                          wordBreak: 'break-all',
-                        }}
-                      >
-                        {evd.sha256}
-                      </code>
-                    </div>
-
-                    {evd.notes && (
-                      <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                        Notes: {evd.notes}
-                      </div>
-                    )}
-                  </div>
-                ))
-              ) : (
-                <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                  <FileCode size={24} style={{ margin: '0 auto 8px auto', display: 'block', opacity: 0.5 }} />
-                  No cryptographic evidence attachments recorded for finding {selectedFinding.id}.
-                </div>
-              )}
-            </div>
-          ),
+          label: `Evidence (${evidenceLoading ? '…' : evidence.length})`,
+          content: evidenceContent,
         },
         {
           id: 'metadata',
-          label: 'Metadata & Audit',
+          label: 'Metadata',
           content: (
             <KeyValue
               items={[
                 { key: 'Finding ID', value: selectedFinding.id },
                 { key: 'Assessment ID', value: selectedFinding.assessmentId },
                 { key: 'Asset ID', value: selectedFinding.assetId },
-                { key: 'Rule Module', value: selectedFinding.ruleId || 'N/A' },
-                { key: 'Classification', value: selectedFinding.cwe || 'None' },
-                { key: 'CVE Reference', value: selectedFinding.cve || 'None' },
-                { key: 'CVSS Score', value: selectedFinding.cvss ?? 'Not scored' },
+                { key: 'Rule', value: selectedFinding.ruleId || 'N/A' },
+                { key: 'CWE', value: selectedFinding.cwe || 'None' },
+                { key: 'CVE', value: selectedFinding.cve || 'None' },
+                { key: 'CVSS', value: selectedFinding.cvss ?? 'Not scored' },
                 { key: 'Confidence', value: selectedFinding.confidence.toUpperCase() },
                 { key: 'Status', value: selectedFinding.status },
-                {
-                  key: 'Discovered (UTC)',
-                  value: new Date(selectedFinding.createdAt).toUTCString(),
-                },
+                { key: 'Discovered (UTC)', value: new Date(selectedFinding.createdAt).toUTCString() },
+                ...(selectedFinding.updatedAt
+                  ? [{ key: 'Updated (UTC)', value: new Date(selectedFinding.updatedAt).toUTCString() }]
+                  : []),
+                { key: 'Source', value: isDemoMode ? 'DEMO fixture' : 'Backend API' },
               ]}
             />
           ),
@@ -328,127 +363,191 @@ export const FindingsPage: React.FC<FindingsPageProps> = ({ isDemoMode }) => {
     : [
         {
           id: 'none',
-          label: 'Advisory Overview',
+          label: 'Advisory',
           content: (
-            <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-muted)' }}>
-              Select a finding from the table to inspect details and cryptographic evidence.
+            <div className="wb-no-selection">
+              Select a finding from the table to inspect details and evidence.
             </div>
           ),
         },
       ];
 
-  if (loading && !isDemoMode) {
-    return <StatePanel kind="loading" title="Retrieving Discovered Findings..." />;
+  if (contextLoading && !isDemoMode) {
+    return <StatePanel kind="loading" title="Loading workspace context…" />;
   }
 
-  if (error && !isDemoMode) {
+  if (!assessmentId && !isDemoMode) {
     return (
       <StatePanel
-        kind="offline"
-        title="Findings Repository Offline"
-        description="Could not query vulnerability findings from local backend API."
+        kind="empty"
+        title="No assessment available"
+        description="Findings require an active assessment from the backend. Create or select an assessment to continue."
+      />
+    );
+  }
+
+  if (loading) {
+    return <StatePanel kind="loading" title="Retrieving findings…" />;
+  }
+
+  if (error) {
+    return (
+      <StatePanel
+        kind={isOffline ? 'offline' : 'error'}
+        title={isOffline ? 'Findings backend unreachable' : 'Findings request failed'}
+        description="No findings are shown because the backend request did not succeed."
         errorMessage={error}
-        onRetry={loadData}
+        onRetry={loadFindings}
       />
     );
   }
 
   return (
-    <div className="wb-split-h">
-      {/* =========================================================================
-          Left Pane: Findings Table with Search & Filter Tabs
-          ========================================================================= */}
-      <div className="wb-panel">
-        <div className="wb-panel-header">
-          <div className="wb-panel-title">
-            <AlertTriangle size={14} color="var(--sev-high-text)" />
-            <span>Discovered Vulnerability Findings</span>
-            <span className="wb-panel-count">{filteredFindings.length}</span>
-            {isDemoMode && <DemoBadge />}
-          </div>
-          <button
-            onClick={loadData}
-            className="wb-btn wb-btn-sm"
-            title="Refresh findings from backend"
-          >
-            <RefreshCw size={10} />
-            Refresh
-          </button>
-        </div>
-
-        <div className="wb-toolbar">
-          <div className="wb-toolbar-group">
-            <Filter size={12} color="var(--text-muted)" />
+    <div className="wb-page-layout">
+      <ContextSidebar
+        title="Findings & Risks"
+        footer={
+          <span>
+            Evidence-first: an empty list is not proof that checks passed.
+          </span>
+        }
+      >
+        <div className="wb-context-section">
+          <div className="wb-section-label">Severity</div>
+          <div className="wb-sidebar-filters">
             <FilterTabs
               options={[
                 { id: 'all', label: 'All', count: findings.length },
-                {
-                  id: 'critical',
-                  label: 'Critical',
-                  count: findings.filter((f) => f.severity === 'critical').length,
-                },
-                {
-                  id: 'high',
-                  label: 'High',
-                  count: findings.filter((f) => f.severity === 'high').length,
-                },
-                {
-                  id: 'medium',
-                  label: 'Medium',
-                  count: findings.filter((f) => f.severity === 'medium').length,
-                },
-                {
-                  id: 'low',
-                  label: 'Low',
-                  count: findings.filter((f) => f.severity === 'low').length,
-                },
+                { id: 'critical', label: 'Critical', count: severityCount('critical') },
+                { id: 'high', label: 'High', count: severityCount('high') },
+                { id: 'medium', label: 'Medium', count: severityCount('medium') },
+                { id: 'low', label: 'Low', count: severityCount('low') },
+                { id: 'info', label: 'Info', count: severityCount('informational') },
               ]}
               activeId={filterSeverity}
-              onChange={setFilterSeverity}
-            />
-          </div>
-
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <Search size={12} color="var(--text-muted)" />
-            <input
-              type="text"
-              className="wb-input"
-              placeholder="Search title, CWE, rule..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              style={{ width: '160px', padding: '3px 6px', fontSize: '11px' }}
+              onChange={(id) => {
+                setFilterSeverity(id);
+                setSelectedFinding(null);
+              }}
             />
           </div>
         </div>
 
-        <div className="wb-panel-body">
-          <DataTable
-            columns={columns}
-            data={filteredFindings}
-            keyExtractor={(row) => row.id}
-            selectedId={selectedFinding?.id}
-            onSelectRow={(row) => setSelectedFinding(row)}
-            emptyMessage={
-              searchQuery || filterSeverity !== 'all'
-                ? 'No findings match the current filter criteria.'
-                : 'No vulnerability findings recorded. Execute checks from the Check Executions tab.'
-            }
+        <div className="wb-context-section">
+          <div className="wb-section-label">Status</div>
+          <div className="wb-sidebar-filters">
+            <FilterTabs
+              options={[
+                { id: 'all', label: 'All', count: findings.length },
+                ...statuses.map((status) => ({
+                  id: status,
+                  label: status,
+                  count: findings.filter((finding) => finding.status === status).length,
+                })),
+              ]}
+              activeId={filterStatus}
+              onChange={(id) => {
+                setFilterStatus(id);
+                setSelectedFinding(null);
+              }}
+            />
+          </div>
+        </div>
+
+        <div className="wb-context-section">
+          <div className="wb-section-label">Result count</div>
+          <KeyValue
+            items={[
+              { key: 'Matched', value: filteredFindings.length },
+              { key: 'Total', value: findings.length },
+              { key: 'Source', value: isDemoMode ? 'DEMO fixture' : 'Backend API' },
+            ]}
           />
         </div>
-      </div>
+      </ContextSidebar>
 
-      {/* =========================================================================
-          Right Pane: Multi-Tab Detail Inspector
-          ========================================================================= */}
-      <div style={{ height: '100%', overflow: 'hidden' }}>
-        <DetailPanel
-          title={
-            selectedFinding
-              ? `Finding Inspector: ${selectedFinding.id}`
-              : 'Finding Inspector'
+      <div className="wb-page-main">
+        <PageHeader
+          title="Findings & Risks"
+          description="Evidence-first review of recorded findings. Empty is not the same as PASS."
+          isDemoMode={isDemoMode}
+          meta={
+            <>
+              <span>
+                Assessment: <strong>{assessmentId || 'No assessment'}</strong>
+              </span>
+              <span>
+                Findings: <strong>{findings.length}</strong>
+              </span>
+            </>
           }
-          tabs={inspectorTabs}
         />
+
+        <div className="wb-page-body wb-split-h">
+          <div className="wb-panel">
+            <div className="wb-panel-header">
+              <div className="wb-panel-title">
+                <AlertTriangle size={14} color="var(--sev-high-text)" />
+                <span>Recorded findings</span>
+                <span className="wb-panel-count">{filteredFindings.length}</span>
+                {isDemoMode && <DemoBadge />}
+              </div>
+              <button
+                type="button"
+                onClick={loadFindings}
+                className="wb-btn wb-btn-sm"
+                title="Refetch findings from the backend"
+              >
+                <RefreshCw size={10} /> Refresh
+              </button>
+            </div>
+
+            <div className="wb-toolbar">
+              <div className="wb-toolbar-group" style={{ flex: 1 }}>
+                <Search size={12} color="var(--text-muted)" />
+                <label className="wb-sr-only" htmlFor="findings-search">
+                  Search findings
+                </label>
+                <input
+                  id="findings-search"
+                  type="text"
+                  className="wb-input"
+                  placeholder="Search ID, title, rule, asset, CWE, CVE…"
+                  value={searchQuery}
+                  onChange={(event) => {
+                    setSearchQuery(event.target.value);
+                    setSelectedFinding(null);
+                  }}
+                  style={{ width: '100%', maxWidth: '320px' }}
+                />
+              </div>
+              <span className="wb-toolbar-hint">
+                {isDemoMode ? 'DEMO fixture' : 'GET /findings?assessmentId=…'}
+              </span>
+            </div>
+
+            <div className="wb-panel-body">
+              <DataTable
+                columns={columns}
+                data={filteredFindings}
+                keyExtractor={(row) => row.id}
+                selectedId={selectedFinding?.id}
+                onSelectRow={(row) => setSelectedFinding(row)}
+                emptyMessage={
+                  findings.length === 0
+                    ? 'No vulnerability findings recorded for this assessment.'
+                    : 'No findings match the current filters. Empty is not PASS.'
+                }
+              />
+            </div>
+          </div>
+
+          <DetailPanel
+            title={selectedFinding ? `Finding: ${selectedFinding.id}` : 'Finding inspector'}
+            tabs={detailTabs}
+            actions={isDemoMode ? <DemoBadge /> : undefined}
+          />
+        </div>
       </div>
     </div>
   );
