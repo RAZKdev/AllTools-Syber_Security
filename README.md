@@ -1,6 +1,6 @@
 # AllTools-CyberSec — Practical Defensive Security Workbench
 
-[![Python Tests](https://img.shields.io/badge/Python%20Tests-46%20Passed%20(100%25)-brightgreen)](#)
+[![Python Tests](https://img.shields.io/badge/Python%20Tests-271%20Passed%20(100%25)-brightgreen)](#)
 [![Vite Build](https://img.shields.io/badge/Vite%20Build-Passing-brightgreen)](#)
 [![Security Policy](https://img.shields.io/badge/Security-Defensive%20Only-blue)](#)
 [![Security Tools](https://img.shields.io/badge/Defensive%20Tools-11%20Active%20Modules-blueviolet)](#)
@@ -34,9 +34,10 @@ Aplikasi ini menolak pendekatan dramatis/alat serang destruktif (*theatrical hac
 Sistem dibangun dengan arsitektur decoupled berorientasi kontrak kanonikal:
 
 ### Backend Application Layer
-- **Bahasa Pemrograman:** Python 3.14+
+- **Bahasa Pemrograman:** Python 3.14 (venv proyek diuji pada 3.14.7)
 - **Web Framework:** FastAPI (Asynchronous REST API)
 - **Data Validation & Modeling:** Pydantic v2 (Pemetaan ketat terhadap kontrak JSON Schema)
+- **Persistence:** SQLite dengan repositori durable, migrasi skema, instance lock, serta layanan backup/restore dan quarantine
 - **Testing Framework:** Pytest (Unit tests, deterministik fixtures, integrasi API)
 - **HTTP Engine:** HTTPX / Standard Socket & SSL
 
@@ -80,6 +81,7 @@ Engagement → Scope Definition → Assessment → Checks → Observation → Fi
      - **`SEC-AUTH-001` (Password Policy & Shannon Entropy Auditor)**: Menghitung skor entropi Shannon informasi (bits per karakter), panjang sandi, keragaman karakter, serta pengecekan daftar kata sandi umum sesuai panduan NIST SP 800-63B. (*CWE-521*).
 
 3. **Evidence Storage & Automated Redaction**:
+   - Penyimpanan bukti durable di direktori data (SQLite + artifact), bukan state sementara proses.
    - Hashing SHA-256 untuk setiap bukti hasil observasi.
    - Sensor otomatis pola kredensial sensitif (`Bearer tokens`, `API keys`, `passwords`, `private keys`, `session cookies`).
 4. **Sistem Pelaporan Audit Terstruktur**:
@@ -91,6 +93,9 @@ Engagement → Scope Definition → Assessment → Checks → Observation → Fi
    - **Executions Console**: Eksekutor pemeriksaan terproteksi dengan audit trail durasi dan status.
    - **Findings Inspector**: Panel telaah temuan mendalam dengan filter tingkat keparahan (*Critical, High, Medium, Low*).
    - **Reports View**: Pratinjau laporan di browser dengan fitur unduh langsung.
+6. **Persistence & Recovery**:
+   - Engagement, assessment, scope, execution, finding, dan evidence tersimpan di SQLite.
+   - Migrasi skema saat startup, instance lock per direktori data, rekonsiliasi eksekusi terputus, serta layanan backup/restore dan quarantine di backend.
 
 ---
 
@@ -101,17 +106,22 @@ alltools-cybersec/
 ├── backend/                   # Python + FastAPI application layer
 │   ├── app/
 │   │   ├── api/               # REST API endpoints (scope, executions, findings, reports)
-│   │   ├── services/          # Scope Guard engine
-│   │   ├── repositories/      # Repositori domain in-memory
-│   │   └── schemas/           # Pydantic models (memetakan core/contracts)
+│   │   ├── core/              # Database, migrasi, instance lock, storage paths
+│   │   ├── migrations/        # Skema SQL
+│   │   ├── repositories/      # Repositori SQLite durable + interface domain
+│   │   ├── services/          # Scope Guard, backup/restore, quarantine, migrasi
+│   │   ├── schemas/           # Pydantic models (memetakan core/contracts)
+│   │   └── cli/               # CLI maintenance & migrasi evidence
 │   └── tests/                 # Unit & integration tests backend
 ├── core/
 │   └── contracts/             # Kontrak domain JSON Schema (Source of Truth)
 ├── frontend/                  # React + TypeScript + Vite UI
 │   └── src/
-│       ├── components/        # Badges, Layout, ScopeIndicator, EmptyState
+│       ├── app/               # Workbench shell & state Live/Demo
+│       ├── components/        # Shell, tabel, dialog, badge, status
 │       ├── pages/             # Dashboard, Scope, Executions, Findings, Reports
-│       └── services/          # API client
+│       ├── services/          # API client
+│       └── demo/              # Fixture demo terisolasi
 ├── security/                  # Security engine (collectors, rules, normalizers)
 ├── evidence/                  # Abstraksi evidence store & redaksi data sensitif
 ├── reports/                   # Generator laporan Markdown & HTML
@@ -124,11 +134,11 @@ alltools-cybersec/
 ## 6. Panduan Menjalankan Sistem
 
 ### Prasyarat
-- Python 3.10+ (Direkomendasikan Python 3.12 atau 3.14)
+- Python 3.14 (venv proyek diuji pada 3.14.7)
 - Node.js v18+ dan npm
 
-### Cara Cepat (1-Click Unified Launcher)
-Cukup klik ganda (double-click) file **`start.bat`** di direktori utama:
+### Cara Cepat (launcher lokal)
+Jika file **`start.bat`** tersedia di working copy lokal (file ini sengaja di-ignore Git, sehingga tidak ikut pada clone repositori):
 - Otomatis memvalidasi dependensi Python dan Node.js/NPM
 - Otomatis menyiapkan environment backend dan frontend bila belum terpasang
 - Menjalankan Backend (port 8000) dan Frontend (port 5173) secara terpadu
@@ -153,9 +163,26 @@ npm run dev
 ```
 *Aplikasi web dapat diakses di:* `http://localhost:5173`
 
-#### 3. Menjalankan Seluruh Automated Tests
+#### 3. Lokasi Data Persisten
+Secara default backend menyimpan data di `%LOCALAPPDATA%\AllTools-CyberSec` (Windows) atau `${XDG_DATA_HOME:-~/.local/share}/AllTools-CyberSec` (POSIX).
+
+Untuk memakai direktori lain, set variabel berikut sebelum backend dijalankan:
+```powershell
+$env:ALLTOOLS_DATA_DIR="D:\data\alltools"
+```
+
+Isi direktori data: `workbench.db`, `evidence/`, `quarantine/`, `backups/`, dan `workbench.lock`. Satu direktori data hanya boleh dipakai oleh satu proses backend (instance lock).
+
+#### 4. Menjalankan Seluruh Automated Tests
 ```powershell
 .\backend\.venv\Scripts\pytest -v
+```
+Saat ini terdapat **271 test backend** (verifikasi terakhir: 271 passed, 1 deprecation warning).
+
+#### 5. Build Frontend
+```powershell
+cd frontend
+npm run build
 ```
 
 ---
@@ -165,3 +192,23 @@ npm run dev
 Proyek ini dibuat secara khusus untuk pengujian defensif berizin resmi (*authorized defensive security*), audit konfigurasi, dan laboratorium riset lokal. 
 
 Dilarang keras menyalahgunakan kode ini untuk pembuatan malware, pencurian kredensial, eksploitasi destruktif, teknik evasif/siluman, persistensi tanpa izin, atau aktivitas ofensif ilegal lainnya.
+
+---
+
+## 8. Status Proyek & Batasan yang Diketahui
+
+**Status verifikasi terakhir (4 November 2026):**
+- **271 backend test passed** (1 deprecation warning dari Starlette TestClient).
+- Frontend TypeScript + Vite build lulus.
+- Data operasional tersimpan di SQLite dan bertahan setelah restart backend.
+
+**Batasan saat ini:**
+- Belum ada UI untuk membuat engagement/assessment; saat ini melalui API.
+- Demo Mode bersifat statis: eksekusi check dan perubahan scope dinonaktifkan.
+- Belum ada endpoint audit log; halaman Reports & Audit memakai execution trail.
+- `/executions/pre-flight` masih membuat execution record; perbaikan semantik ini memerlukan audit backend terpisah.
+- Tabel pada layar mobile masih dapat scroll horizontal.
+- Belum ada automated test frontend; verifikasi frontend memakai TypeScript build + browser QA.
+- Ditujukan untuk penggunaan lokal single-user: CORS terbuka dan belum ada autentikasi.
+- `SEC-AUTH-001` dan `SEC-CRYPTO-001` adalah analisis offline; label `ALLOW` di UI bukan otorisasi untuk aktivitas jaringan.
+- Proxy Vite default mengarah ke port `8000`.
