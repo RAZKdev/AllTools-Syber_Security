@@ -357,6 +357,12 @@ export const App: React.FC = () => {
     ? DEMO_ASSESSMENT
     : assessments.find((item) => item.id === selectedAssessmentId) || null;
 
+  // Remount page views when the active scope context changes so in-flight
+  // requests from a previous assessment cannot overwrite the new view.
+  const pageKey = isDemoMode
+    ? 'demo'
+    : `${selectedEngagementId || 'no-engagement'}:${selectedAssessmentId || 'no-assessment'}`;
+
   return (
     <AppShell
       currentTab={currentTab}
@@ -383,7 +389,7 @@ export const App: React.FC = () => {
     >
       {currentTab === 'dashboard' && (
         <DashboardPage
-          key={isDemoMode ? 'demo' : 'live'}
+          key={pageKey}
           isDemoMode={isDemoMode}
           assessmentId={selectedAssessmentId}
           engagementId={selectedEngagementId}
@@ -400,7 +406,7 @@ export const App: React.FC = () => {
 
       {currentTab === 'scope' && (
         <ScopePage
-          key={isDemoMode ? 'demo' : 'live'}
+          key={pageKey}
           isDemoMode={isDemoMode}
           assessmentId={selectedAssessmentId}
           engagementId={selectedEngagementId}
@@ -416,7 +422,7 @@ export const App: React.FC = () => {
 
       {currentTab === 'executions' && (
         <ExecutionsPage
-          key={isDemoMode ? 'demo' : 'live'}
+          key={pageKey}
           isDemoMode={isDemoMode}
           assessmentId={selectedAssessmentId}
           connectionState={connectionState}
@@ -432,7 +438,7 @@ export const App: React.FC = () => {
 
       {currentTab === 'findings' && (
         <FindingsPage
-          key={isDemoMode ? 'demo' : 'live'}
+          key={pageKey}
           isDemoMode={isDemoMode}
           assessmentId={selectedAssessmentId}
           connectionState={connectionState}
@@ -445,7 +451,7 @@ export const App: React.FC = () => {
 
       {currentTab === 'reports' && (
         <ReportsPage
-          key={isDemoMode ? 'demo' : 'live'}
+          key={pageKey}
           isDemoMode={isDemoMode}
           assessmentId={selectedAssessmentId}
           connectionState={connectionState}
