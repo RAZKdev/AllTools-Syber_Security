@@ -2,17 +2,75 @@ import os
 import sys
 import time
 import threading
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import api_router
+from app.core import (
+    check_database_health,
+    ensure_storage_directories,
+    get_storage_paths,
+)
+from app.dependencies import ensure_database_initialized, get_db_path
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    FastAPI lifespan manager.
+    Enforces ADR-01, ADR-04, and P0 Process Ownership:
+    - Validates storage directory and fails closed if invalid.
+    - Acquires OS-level exclusive process lock for the configured data directory.
+    - Rejects multi-worker or concurrent backend processes.
+    - Applies SQLite schema migrations to the target database file.
+    - Reconciles any orphaned in-flight executions left over from previous process termination.
+    - Releases process lock cleanly on graceful shutdown.
+    - Never silently falls back to in-memory repositories.
+    """
+    paths = get_storage_paths()
+    ensure_storage_directories(paths)
+
+    from app.core.instance_lock import InstanceLock, ProcessLockError
+    lock = InstanceLock(paths.lock_file)
+    try:
+        lock.acquire()
+    except ProcessLockError as e:
+        print(f"[FATAL] Process lock failure: {e}", file=sys.stderr)
+        raise RuntimeError(f"AllTools-CyberSec process lock failure: {e}") from e
+
+    try:
+        ensure_database_initialized(paths.database_file)
+
+        # P0 Lifecycle: Reconcile any in-flight stale records left over from previous process termination
+        from app.repositories.sqlite_execution_repository import SqliteExecutionRepository
+        reconciled = SqliteExecutionRepository(db_path=paths.database_file).reconcile_stale_executions()
+        if reconciled > 0:
+            print(f"[RECONCILE] Reconciled {reconciled} stale in-flight execution(s) to INTERRUPTED state.", file=sys.stderr)
+
+        # F-03 Lifecycle: Reconcile any abandoned backup staging folders and stranded IN_PROGRESS records
+        from app.services.backup_engine import BackupEngine
+        reconciled_backups = BackupEngine(paths=paths).cleanup_stale_staging(max_age_seconds=0)
+        if reconciled_backups > 0:
+            print(f"[RECONCILE] Reconciled {reconciled_backups} stale backup staging folder(s).", file=sys.stderr)
+    except Exception as e:
+        lock.release()
+        print(f"[FATAL] Storage or SQLite initialization failed: {e}", file=sys.stderr)
+        raise RuntimeError(f"Storage or SQLite initialization failed: {e}") from e
+
+    try:
+        yield
+    finally:
+        lock.release()
+
 
 app = FastAPI(
     title="AllTools-CyberSec Workbench API",
     description="Practical Defensive Security Workbench API with Scope Guard enforcement.",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # Configure CORS for local development and frontend access
@@ -101,12 +159,16 @@ def schedule_shutdown():
 
 @app.get("/health", tags=["System"])
 def health_check():
-    """System health check endpoint."""
+    """System health check endpoint with database status verification."""
+    db_file = get_db_path()
+    db_health = check_database_health(db_file)
+    is_healthy = db_health.get("healthy", False)
     return {
-        "status": "healthy",
+        "status": "healthy" if is_healthy else "degraded",
         "service": "alltools-cybersec-backend",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "version": "0.1.0",
+        "database": db_health,
     }
 
 

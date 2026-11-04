@@ -16,6 +16,11 @@ class Confidence(str, Enum):
 
 
 class ExecutionStatus(str, Enum):
+    # Non-terminal in-flight states
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+
+    # Terminal states
     PASS = "PASS"
     FAIL = "FAIL"
     WARN = "WARN"
@@ -23,6 +28,26 @@ class ExecutionStatus(str, Enum):
     ERROR = "ERROR"
     BLOCKED_OUT_OF_SCOPE = "BLOCKED_OUT_OF_SCOPE"
     INSUFFICIENT_DATA = "INSUFFICIENT_DATA"
+    INTERRUPTED = "INTERRUPTED"
+    UNKNOWN = "UNKNOWN"
+
+
+TERMINAL_EXECUTION_STATUSES = {
+    ExecutionStatus.PASS,
+    ExecutionStatus.FAIL,
+    ExecutionStatus.WARN,
+    ExecutionStatus.NOT_TESTED,
+    ExecutionStatus.ERROR,
+    ExecutionStatus.BLOCKED_OUT_OF_SCOPE,
+    ExecutionStatus.INSUFFICIENT_DATA,
+    ExecutionStatus.INTERRUPTED,
+    ExecutionStatus.UNKNOWN,
+}
+
+NON_TERMINAL_EXECUTION_STATUSES = {
+    ExecutionStatus.PENDING,
+    ExecutionStatus.RUNNING,
+}
 
 
 class FindingStatus(str, Enum):

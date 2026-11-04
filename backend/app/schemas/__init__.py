@@ -42,6 +42,17 @@ from app.schemas.evidence import (
     EvidenceCreate,
     EvidenceType,
 )
+from app.schemas.quarantine import (
+    QuarantineItem,
+    QuarantineReason,
+)
+from app.schemas.backup import (
+    BackupFileEntry,
+    BackupManifest,
+    BackupSnapshot,
+    BackupStatus,
+    DatabaseIntegrityInfo,
+)
 
 __all__ = [
     "Severity",
@@ -72,4 +83,11 @@ __all__ = [
     "Evidence",
     "EvidenceCreate",
     "EvidenceType",
+    "QuarantineItem",
+    "QuarantineReason",
+    "BackupStatus",
+    "BackupManifest",
+    "BackupSnapshot",
+    "BackupFileEntry",
+    "DatabaseIntegrityInfo",
 ]

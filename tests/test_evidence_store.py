@@ -4,8 +4,8 @@ from evidence.storage import EvidenceStore
 
 
 @pytest.fixture
-def store():
-    return EvidenceStore()
+def store(tmp_path):
+    return EvidenceStore(base_dir=tmp_path)
 
 
 def test_evidence_hashing_and_integrity(store):

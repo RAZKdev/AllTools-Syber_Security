@@ -8,13 +8,19 @@
     "id": { "type": "string", "minLength": 1 },
     "assessmentId": { "type": "string", "minLength": 1 },
     "findingId": { "type": "string" },
-    "type": { "type": "string", "enum": ["http_response", "screenshot", "log_excerpt", "json_result", "file", "configuration_snapshot", "hash", "other"] },
+    "type": { "type": "string", "enum": ["http_request", "http_response", "log_snippet", "log_excerpt", "raw_output", "json_result", "screenshot", "file", "configuration_snapshot", "hash", "other"] },
     "source": { "type": "string" },
     "artifactPath": { "type": "string" },
     "capturedAt": { "type": "string", "format": "date-time" },
     "sha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" },
     "redacted": { "type": "boolean" },
-    "notes": { "type": "string" }
+    "notes": { "type": "string" },
+    "syncStatus": { "type": "string", "enum": ["PREPARED", "COMMITTED", "COLLISION_ERROR", "ORPHANED", "MISSING_FILE", "CORRUPTED", "QUARANTINED", "PURGED"] },
+    "retentionPolicy": { "type": "string", "enum": ["retain_indefinite", "retain_90_days", "custom"] },
+    "purgeEligibleAt": { "type": ["string", "null"], "format": "date-time" },
+    "legalHold": { "type": "boolean" },
+    "isDeleted": { "type": "boolean" },
+    "deletedAt": { "type": ["string", "null"], "format": "date-time" }
   },
   "additionalProperties": false
 }

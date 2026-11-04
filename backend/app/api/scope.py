@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.schemas.scope import (
     ScopeItem,
@@ -7,7 +7,8 @@ from app.schemas.scope import (
     ScopeEvaluationRequest,
     ScopeEvaluationResult,
 )
-from app.repositories.scope_repository import scope_repository
+from app.repositories.interfaces import IScopeRepository
+from app.dependencies import get_scope_repository
 from app.services.scope_guard import ScopeGuard
 
 router = APIRouter(prefix="/scope")
@@ -15,19 +16,22 @@ scope_guard = ScopeGuard()
 
 
 @router.post("/evaluate", response_model=ScopeEvaluationResult)
-def evaluate_target(payload: ScopeEvaluationRequest) -> ScopeEvaluationResult:
+def evaluate_target(
+    payload: ScopeEvaluationRequest,
+    repo: IScopeRepository = Depends(get_scope_repository),
+) -> ScopeEvaluationResult:
     """
     Evaluate whether a target is permitted under an assessment's authorized scope.
     Fails closed: If target is out of scope or matches an explicit exclusion, decision is BLOCK.
     """
-    assessment = scope_repository.get_assessment(payload.assessmentId)
+    assessment = repo.get_assessment(payload.assessmentId)
     if not assessment:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Assessment '{payload.assessmentId}' not found.",
         )
 
-    scope_items = scope_repository.get_scope_for_assessment(payload.assessmentId)
+    scope_items = repo.get_scope_for_assessment(payload.assessmentId)
     result = scope_guard.evaluate_target(
         assessment_id=payload.assessmentId,
         target=payload.target,
@@ -45,18 +49,40 @@ def evaluate_target(payload: ScopeEvaluationRequest) -> ScopeEvaluationResult:
 
 
 @router.post("/items", response_model=ScopeItem, status_code=status.HTTP_201_CREATED)
-def create_scope_item(payload: ScopeItemCreate) -> ScopeItem:
+def create_scope_item(
+    payload: ScopeItemCreate,
+    repo: IScopeRepository = Depends(get_scope_repository),
+) -> ScopeItem:
     """Create a new scope item for an engagement."""
-    engagement = scope_repository.get_engagement(payload.engagementId)
+    engagement = repo.get_engagement(payload.engagementId)
     if not engagement:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Engagement '{payload.engagementId}' not found.",
         )
-    return scope_repository.create_scope_item(payload)
+    return repo.create_scope_item(payload)
 
 
 @router.get("/items", response_model=List[ScopeItem])
-def list_scope_items(engagement_id: Optional[str] = Query(None, alias="engagementId")) -> List[ScopeItem]:
-    """List scope items, optionally filtered by engagementId."""
-    return scope_repository.list_scope_items(engagement_id=engagement_id)
+def list_scope_items(
+    engagement_id: Optional[str] = Query(None, alias="engagementId"),
+    repo: IScopeRepository = Depends(get_scope_repository),
+) -> List[ScopeItem]:
+    """List non-deleted scope items, optionally filtered by engagementId."""
+    return repo.list_scope_items(engagement_id=engagement_id)
+
+
+@router.delete("/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_scope_item(
+    item_id: str,
+    repo: IScopeRepository = Depends(get_scope_repository),
+) -> Response:
+    """Soft-delete a scope item."""
+    item = repo.get_scope_item(item_id)
+    if not item:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Scope item '{item_id}' not found.",
+        )
+    repo.soft_delete_scope_item(item_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

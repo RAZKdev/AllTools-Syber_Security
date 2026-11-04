@@ -10,11 +10,12 @@
     "ruleId": { "type": "string", "minLength": 1 },
     "target": { "type": "string", "minLength": 1 },
     "scopeDecision": { "type": "string", "enum": ["ALLOW", "BLOCK"] },
-    "status": { "type": "string", "enum": ["PASS", "FAIL", "WARN", "NOT_TESTED", "ERROR", "BLOCKED_OUT_OF_SCOPE", "INSUFFICIENT_DATA"] },
+    "status": { "type": "string", "enum": ["PENDING", "RUNNING", "PASS", "FAIL", "WARN", "NOT_TESTED", "ERROR", "BLOCKED_OUT_OF_SCOPE", "INSUFFICIENT_DATA", "INTERRUPTED", "UNKNOWN"] },
     "ruleVersion": { "type": "string" },
     "durationMs": { "type": "integer", "minimum": 0 },
     "errorCode": { "type": "string" },
     "errorMessage": { "type": "string" },
+    "requestFingerprint": { "type": "string" },
     "executedAt": { "type": "string", "format": "date-time" }
   },
   "additionalProperties": false
