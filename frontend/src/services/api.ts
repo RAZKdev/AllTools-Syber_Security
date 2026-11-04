@@ -57,17 +57,31 @@ export interface ScopeEvaluationResult {
   evaluatedAt: string;
 }
 
+export type ExecutionStatusValue =
+  | 'PENDING'
+  | 'RUNNING'
+  | 'PASS'
+  | 'FAIL'
+  | 'WARN'
+  | 'NOT_TESTED'
+  | 'ERROR'
+  | 'BLOCKED_OUT_OF_SCOPE'
+  | 'INSUFFICIENT_DATA'
+  | 'INTERRUPTED'
+  | 'UNKNOWN';
+
 export interface CheckExecutionRecord {
   id: string;
   assessmentId: string;
   ruleId: string;
   target: string;
   scopeDecision: 'ALLOW' | 'BLOCK';
-  status: string;
+  status: ExecutionStatusValue;
   ruleVersion?: string;
   durationMs?: number;
   errorCode?: string;
   errorMessage?: string;
+  requestFingerprint?: string;
   executedAt: string;
 }
 
@@ -184,6 +198,23 @@ async function handleResponse<T>(res: Response, endpoint: string): Promise<T> {
   }
 }
 
+function createExecutionId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `CHK-${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
+  }
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const bytes = crypto.getRandomValues(new Uint8Array(6));
+    return `CHK-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+  }
+  // Last-resort uniqueness fallback for browsers without Web Crypto.
+  executionIdFallbackCounter += 1;
+  return `CHK-${Date.now().toString(16)}${executionIdFallbackCounter
+    .toString(16)
+    .padStart(4, '0')}`;
+}
+
+let executionIdFallbackCounter = 0;
+
 export const api = {
   async getHealth(): Promise<HealthResponse> {
     const res = await fetchWithTimeout('/health', {}, 4000);
@@ -299,11 +330,16 @@ export const api = {
     return handleResponse<PreFlightCheckResponse>(res, `${API_BASE}/executions/pre-flight`);
   },
 
-  async runCheck(assessmentId: string, ruleId: string, target: string, simulatedData?: any): Promise<RunCheckResponse> {
+  async runCheck(assessmentId: string, ruleId: string, target: string, simulatedData?: any, idempotencyKey?: string): Promise<RunCheckResponse> {
+    const key = idempotencyKey || createExecutionId();
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Idempotency-Key': key,
+    };
     const res = await fetchWithTimeout(`${API_BASE}/executions/run`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ assessmentId, ruleId, target, simulatedData }),
+      headers,
+      body: JSON.stringify({ id: key, assessmentId, ruleId, target, simulatedData }),
     });
     return handleResponse<RunCheckResponse>(res, `${API_BASE}/executions/run`);
   },

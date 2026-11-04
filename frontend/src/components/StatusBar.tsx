@@ -101,7 +101,10 @@ export const StatusBar: React.FC<StatusBarProps> = ({
         <div className="wb-statusbar-item wb-statusbar-assessment">
           <span>Assessment:</span>
           <strong title={assessmentName || undefined}>
-            {assessmentId || 'No assessment'}
+            {assessmentId ||
+              (connectionState === 'offline' || connectionState === 'api_error'
+                ? 'Unavailable'
+                : 'No assessment')}
           </strong>
           {assessmentName && (
             <span className="wb-statusbar-muted">({assessmentName})</span>
@@ -131,13 +134,17 @@ export const StatusBar: React.FC<StatusBarProps> = ({
           className="wb-statusbar-item"
           style={{ color: 'var(--text-muted)' }}
           title={
-            engagementName
-              ? `Engagement: ${engagementName}. Data is stored in memory and resets when the backend restarts.`
-              : 'Data is stored in memory and resets when the backend restarts.'
+            isDemoMode
+              ? 'Demo data comes from static fixtures and is never stored by the backend.'
+              : engagementName
+                ? `Engagement: ${engagementName}. Operational data is provided by backend-managed storage.`
+                : 'Operational data is provided by backend-managed storage.'
           }
         >
           <Database size={11} />
-          <span>Session data: in-memory (reset on restart)</span>
+          <span>
+            {isDemoMode ? 'Storage: demo fixtures' : 'Storage: backend-managed'}
+          </span>
         </div>
 
         <div className="wb-statusbar-item wb-statusbar-muted">

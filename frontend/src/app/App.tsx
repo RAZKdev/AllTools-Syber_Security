@@ -42,7 +42,7 @@ function pickAssessment(
     if (preferred) return preferred;
   }
   const running = list
-    .filter((item) => item.status === 'RUNNING')
+    .filter((item) => item.status.toUpperCase() === 'RUNNING')
     .sort((a, b) => {
       const aTime = Date.parse(a.startedAt || a.createdAt || '');
       const bTime = Date.parse(b.startedAt || b.createdAt || '');
@@ -112,12 +112,15 @@ export const App: React.FC = () => {
         setScopeRulesCount(null);
         return;
       }
+      const requestId = contextRequestId.current;
       try {
         const items = await api.getScopeItems(engagementId);
+        if (contextRequestId.current !== requestId) return;
         setScopeRulesCount(
           items.filter((item) => item.inScope && !isExpired(item.expiresAt)).length,
         );
       } catch {
+        if (contextRequestId.current !== requestId) return;
         // An error is not zero rules. Keep the value unknown.
         setScopeRulesCount(null);
       }
@@ -161,7 +164,9 @@ export const App: React.FC = () => {
                 selectedEngagementIdRef.current ||
                 undefined),
           ) ||
-          engagementList.find((item) => item.status === 'ACTIVE') ||
+          engagementList.find(
+            (item) => item.status.toUpperCase() === 'ACTIVE',
+          ) ||
           engagementList[0] ||
           null;
 
@@ -220,7 +225,6 @@ export const App: React.FC = () => {
   // Initial context + demo/live transition
   useEffect(() => {
     if (isDemoMode) {
-      setConnectionState((current) => current);
       setEnforcementStatus('demo');
       setEnforcementReason('Demo Mode does not run enforcement probes.');
       loadWorkspaceContext({ demo: true });
@@ -379,6 +383,7 @@ export const App: React.FC = () => {
     >
       {currentTab === 'dashboard' && (
         <DashboardPage
+          key={isDemoMode ? 'demo' : 'live'}
           isDemoMode={isDemoMode}
           assessmentId={selectedAssessmentId}
           engagementId={selectedEngagementId}
@@ -386,6 +391,8 @@ export const App: React.FC = () => {
           assessment={selectedAssessment}
           connectionState={connectionState}
           contextLoading={contextLoading}
+          contextError={contextError}
+          onRetryContext={handleRefreshAll}
           refreshToken={refreshNonce}
           onNavigateTab={handleTabChange}
         />
@@ -393,21 +400,29 @@ export const App: React.FC = () => {
 
       {currentTab === 'scope' && (
         <ScopePage
+          key={isDemoMode ? 'demo' : 'live'}
           isDemoMode={isDemoMode}
           assessmentId={selectedAssessmentId}
           engagementId={selectedEngagementId}
           connectionState={connectionState}
           contextLoading={contextLoading}
+          contextError={contextError}
+          onRetryContext={handleRefreshAll}
           refreshToken={refreshNonce}
+          enforcementStatus={enforcementStatus}
           onScopeUpdated={() => loadScopeSummary(selectedEngagementId, false)}
         />
       )}
 
       {currentTab === 'executions' && (
         <ExecutionsPage
+          key={isDemoMode ? 'demo' : 'live'}
           isDemoMode={isDemoMode}
           assessmentId={selectedAssessmentId}
           connectionState={connectionState}
+          contextLoading={contextLoading}
+          contextError={contextError}
+          onRetryContext={handleRefreshAll}
           refreshToken={refreshNonce}
           onExecutionsChanged={() =>
             loadScopeSummary(selectedEngagementId, false)
@@ -417,19 +432,28 @@ export const App: React.FC = () => {
 
       {currentTab === 'findings' && (
         <FindingsPage
+          key={isDemoMode ? 'demo' : 'live'}
           isDemoMode={isDemoMode}
           assessmentId={selectedAssessmentId}
           connectionState={connectionState}
+          contextLoading={contextLoading}
+          contextError={contextError}
+          onRetryContext={handleRefreshAll}
           refreshToken={refreshNonce}
         />
       )}
 
       {currentTab === 'reports' && (
         <ReportsPage
+          key={isDemoMode ? 'demo' : 'live'}
           isDemoMode={isDemoMode}
           assessmentId={selectedAssessmentId}
           connectionState={connectionState}
+          contextLoading={contextLoading}
+          contextError={contextError}
+          onRetryContext={handleRefreshAll}
           refreshToken={refreshNonce}
+          onNavigateTab={handleTabChange}
         />
       )}
     </AppShell>

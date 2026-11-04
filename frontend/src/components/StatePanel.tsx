@@ -28,7 +28,7 @@ export const StatePanel: React.FC<StatePanelProps> = ({
         <RefreshCw size={24} className="wb-state-icon spin" color="var(--accent)" />
         <div className="wb-state-title">{title || 'Loading operational data...'}</div>
         <div className="wb-state-desc">
-          {description || 'Connecting to backend API endpoints and retrieving verified records.'}
+          {description || 'Connecting to backend API endpoints and retrieving backend records.'}
         </div>
       </div>
     );
@@ -111,7 +111,7 @@ export const StatePanel: React.FC<StatePanelProps> = ({
       <Icon size={26} className="wb-state-icon" />
       <div className="wb-state-title">{title || 'No records found'}</div>
       <div className="wb-state-desc">
-        {description || 'No operational data is currently recorded in this session.'}
+        {description || 'No operational data is currently recorded by the backend.'}
       </div>
       {action && <div style={{ marginTop: '8px' }}>{action}</div>}
     </div>

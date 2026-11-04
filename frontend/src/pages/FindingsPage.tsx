@@ -24,6 +24,8 @@ interface FindingsPageProps {
   assessmentId: string | null;
   connectionState: BackendConnectionState;
   contextLoading?: boolean;
+  contextError?: string | null;
+  onRetryContext?: () => void;
   refreshToken?: number;
 }
 
@@ -32,6 +34,8 @@ export const FindingsPage: React.FC<FindingsPageProps> = ({
   assessmentId,
   connectionState,
   contextLoading = false,
+  contextError = null,
+  onRetryContext,
   refreshToken = 0,
 }) => {
   const [findings, setFindings] = useState<Finding[]>([]);
@@ -374,6 +378,18 @@ export const FindingsPage: React.FC<FindingsPageProps> = ({
 
   if (contextLoading && !isDemoMode) {
     return <StatePanel kind="loading" title="Loading workspace context…" />;
+  }
+
+  if (contextError && !isDemoMode) {
+    return (
+      <StatePanel
+        kind={isOffline ? 'offline' : 'error'}
+        title="Workspace context unavailable"
+        description="The engagement and assessment lists could not be loaded, so no findings can be shown."
+        errorMessage={contextError}
+        onRetry={onRetryContext}
+      />
+    );
   }
 
   if (!assessmentId && !isDemoMode) {

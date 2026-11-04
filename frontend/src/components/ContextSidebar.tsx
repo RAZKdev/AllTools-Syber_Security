@@ -12,7 +12,9 @@ export const ContextSidebar: React.FC<ContextSidebarProps> = ({
   children,
   footer,
 }) => {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth < 900,
+  );
   const panelId = useId();
 
   return (

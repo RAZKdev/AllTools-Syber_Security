@@ -1,41 +1,37 @@
 :root {
-  /* ==========================================================================
-     Burp Suite Professional Inspired Defensive Security Graphite Theme
-     ========================================================================== */
+  /* Graphite / steel-blue security workbench palette */
+  --bg-canvas: #0c0e11;
+  --bg-surface: #111418;
+  --bg-surface-elevated: #15191e;
+  --bg-surface-hover: #1a1f25;
+  --bg-surface-active: #20262e;
+  --bg-panel-header: #15191e;
+  --bg-table-header: #14181d;
+  --bg-table-row: #111418;
+  --bg-table-zebra: #0f1216;
+  --bg-table-selected: #172432;
+  --bg-table-hover: #1a1f25;
 
-  /* Base Backgrounds (Dark Graphite / Charcoal) */
-  --bg-canvas: #0c0e12;
-  --bg-surface: #14171d;
-  --bg-surface-elevated: #1a1e26;
-  --bg-surface-hover: #222732;
-  --bg-surface-active: #2a313e;
-  --bg-panel-header: #181c24;
-  --bg-table-header: #161a22;
-  --bg-table-row: #14171d;
-  --bg-table-zebra: #101319;
-  --bg-table-selected: #1e2838;
-  --bg-table-hover: #1b212c;
+  /* Structural 1px borders */
+  --border-subtle: #232a32;
+  --border-default: #303943;
+  --border-strong: #414c58;
+  --border-focus: #5aa9e6;
 
-  /* Structural 1px Borders */
-  --border-subtle: #202530;
-  --border-default: #2a3140;
-  --border-strong: #3b4457;
-  --border-focus: #4b88ff;
+  /* Technical typography colors */
+  --text-primary: #e7eaee;
+  --text-secondary: #a5adb7;
+  --text-muted: #7f8995;
+  --text-inverse: #0c0e11;
 
-  /* Technical Typography Colors */
-  --text-primary: #e4e7ed;
-  --text-secondary: #9aa2b2;
-  --text-muted: #677082;
-  --text-inverse: #0c0e12;
+  /* Single controlled accent */
+  --accent: #5aa9e6;
+  --accent-hover: #7cc4f5;
+  --accent-active: #4a96cf;
+  --accent-muted: rgba(90, 169, 230, 0.12);
+  --accent-border: rgba(90, 169, 230, 0.45);
 
-  /* Accent & Interactive (Muted Cyan / Blue) */
-  --accent: #4b88ff;
-  --accent-hover: #6ea1ff;
-  --accent-active: #3a75e6;
-  --accent-muted: rgba(75, 136, 255, 0.12);
-  --accent-border: rgba(75, 136, 255, 0.35);
-
-  /* Status Tokens */
+  /* Status tokens (kept separate from the accent) */
   --status-pass-text: #3ec487;
   --status-pass-bg: rgba(62, 196, 135, 0.12);
   --status-pass-border: rgba(62, 196, 135, 0.35);
@@ -60,7 +56,7 @@
   --status-neutral-bg: rgba(142, 152, 168, 0.12);
   --status-neutral-border: rgba(142, 152, 168, 0.28);
 
-  /* Severity Levels (Burp / CVSS standard) */
+  /* Severity levels */
   --sev-critical-text: #ff4757;
   --sev-critical-bg: rgba(255, 71, 87, 0.18);
   --sev-critical-border: rgba(255, 71, 87, 0.45);
@@ -81,19 +77,26 @@
   --sev-info-bg: rgba(154, 162, 178, 0.12);
   --sev-info-border: rgba(154, 162, 178, 0.28);
 
-  /* Demo Banner Highlight */
+  /* Demo highlight */
   --demo-banner-bg: #804c00;
   --demo-banner-border: #b36b00;
   --demo-banner-text: #ffe0b2;
 
-  /* Font Stacks (Local offline-first fallback) */
+  /* Font stacks (local, offline-first) */
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: "JetBrains Mono", "Cascadia Code", "Fira Code", "SF Mono", Consolas, Menlo, monospace;
+  --font-mono: "Cascadia Mono", "Cascadia Code", "Consolas", "SFMono-Regular", ui-monospace, monospace;
 
-  /* Layout Constants */
-  --topbar-height: 40px;
-  --tabbar-height: 32px;
+  /* Layout constants */
+  --topbar-height: 46px;
+  --tabbar-height: 36px;
   --statusbar-height: 26px;
+  --context-sidebar-width: 232px;
+  --detail-panel-width: 360px;
   --table-row-height: 32px;
   --header-cell-height: 30px;
+
+  /* Spacing / radius */
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
 }

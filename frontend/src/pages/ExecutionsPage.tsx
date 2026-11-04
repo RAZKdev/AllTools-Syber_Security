@@ -32,6 +32,8 @@ interface ExecutionsPageProps {
   assessmentId: string | null;
   connectionState: BackendConnectionState;
   contextLoading?: boolean;
+  contextError?: string | null;
+  onRetryContext?: () => void;
   refreshToken?: number;
   onExecutionsChanged?: () => void;
 }
@@ -43,6 +45,8 @@ export const ExecutionsPage: React.FC<ExecutionsPageProps> = ({
   assessmentId,
   connectionState,
   contextLoading = false,
+  contextError = null,
+  onRetryContext,
   refreshToken = 0,
   onExecutionsChanged,
 }) => {
@@ -199,7 +203,7 @@ export const ExecutionsPage: React.FC<ExecutionsPageProps> = ({
     {
       key: 'executedAt',
       label: 'Executed',
-      width: '125px',
+      width: '78px',
       render: (row) => (
         <span className="wb-mono-muted">
           {new Date(row.executedAt).toLocaleTimeString()}
@@ -209,7 +213,7 @@ export const ExecutionsPage: React.FC<ExecutionsPageProps> = ({
     {
       key: 'id',
       label: 'Execution ID',
-      width: '125px',
+      width: '112px',
       render: (row) => (
         <code style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{row.id}</code>
       ),
@@ -217,7 +221,7 @@ export const ExecutionsPage: React.FC<ExecutionsPageProps> = ({
     {
       key: 'ruleId',
       label: 'Rule',
-      width: '115px',
+      width: '96px',
       render: (row) => (
         <code style={{ color: 'var(--accent)', fontWeight: 600 }}>{row.ruleId}</code>
       ),
@@ -226,7 +230,11 @@ export const ExecutionsPage: React.FC<ExecutionsPageProps> = ({
       key: 'target',
       label: 'Target',
       render: (row) => (
-        <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>
+        <span
+          className="wb-cell-truncate"
+          title={row.target}
+          style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}
+        >
           {row.target}
         </span>
       ),
@@ -234,7 +242,7 @@ export const ExecutionsPage: React.FC<ExecutionsPageProps> = ({
     {
       key: 'scopeDecision',
       label: 'Scope',
-      width: '90px',
+      width: '78px',
       render: (row) => (
         <span
           className="wb-chip"
@@ -261,23 +269,25 @@ export const ExecutionsPage: React.FC<ExecutionsPageProps> = ({
     {
       key: 'status',
       label: 'Status',
-      width: '150px',
+      width: '112px',
       render: (row) => <StatusBadge status={row.status} size="sm" />,
-    },
-    {
-      key: 'durationMs',
-      label: 'Duration',
-      width: '85px',
-      render: (row) => (
-        <span className="wb-mono-muted">
-          {row.durationMs !== undefined ? `${row.durationMs}ms` : '—'}
-        </span>
-      ),
     },
   ];
 
   if (contextLoading && !isDemoMode) {
     return <StatePanel kind="loading" title="Loading workspace context…" />;
+  }
+
+  if (contextError && !isDemoMode) {
+    return (
+      <StatePanel
+        kind={isOffline ? 'offline' : 'error'}
+        title="Workspace context unavailable"
+        description="The engagement and assessment lists could not be loaded, so no execution data can be shown."
+        errorMessage={contextError}
+        onRetry={onRetryContext}
+      />
+    );
   }
 
   if (loading) {
@@ -302,8 +312,9 @@ export const ExecutionsPage: React.FC<ExecutionsPageProps> = ({
         title="Check Executions"
         footer={
           <span>
-            Execution records are in-memory session data and reset when the
-            backend restarts.
+            {isDemoMode
+              ? 'Fixture execution records for visual exploration only.'
+              : 'Execution records are read from the backend audit trail for the selected assessment.'}
           </span>
         }
       >
@@ -313,7 +324,7 @@ export const ExecutionsPage: React.FC<ExecutionsPageProps> = ({
             items={[
               { key: 'Assessment', value: assessmentId || 'No assessment' },
               { key: 'Rules available', value: rules.length },
-              { key: 'Session executions', value: executions.length },
+              { key: 'Executions', value: executions.length },
               {
                 key: 'Source',
                 value: isDemoMode ? 'DEMO fixture' : 'Backend API',
@@ -360,7 +371,11 @@ export const ExecutionsPage: React.FC<ExecutionsPageProps> = ({
       <div className="wb-page-main">
         <PageHeader
           title="Check Executions"
-          description="Run defensive checks with confirmation. The backend re-validates every target against Scope Guard."
+          description={
+            isDemoMode
+              ? 'Demo fixture records. The launcher is disabled; nothing is sent to a target.'
+              : 'Run defensive checks with confirmation. The backend re-validates every target against Scope Guard.'
+          }
           isDemoMode={isDemoMode}
           meta={
             <>
@@ -622,7 +637,7 @@ export const ExecutionsPage: React.FC<ExecutionsPageProps> = ({
                   onSelectRow={(row) => setSelectedExec(row)}
                   emptyMessage={
                     executions.length === 0
-                      ? 'No checks have been recorded in this backend session.'
+                      ? 'No checks have been recorded by the backend.'
                       : 'No executions match the selected status filter.'
                   }
                 />

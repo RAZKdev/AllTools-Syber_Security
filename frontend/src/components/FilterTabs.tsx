@@ -20,7 +20,15 @@ export const FilterTabs: React.FC<FilterTabsProps> = ({
   size = 'sm',
 }) => {
   return (
-    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
+    <div
+      style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        alignItems: 'center',
+        gap: '3px',
+        maxWidth: '100%',
+      }}
+    >
       {options.map((opt) => {
         const isActive = activeId === opt.id;
         return (

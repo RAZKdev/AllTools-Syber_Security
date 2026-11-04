@@ -130,7 +130,13 @@ export const AppShell: React.FC<AppShellProps> = ({
               disabled={isDemoMode || contextLoading || engagements.length === 0}
             >
               {engagements.length === 0 && (
-                <option value="">No engagement available</option>
+                <option value="">
+                  {contextError
+                    ? 'Context unavailable'
+                    : contextLoading
+                      ? 'Loading engagements…'
+                      : 'No engagement available'}
+                </option>
               )}
               {engagements.map((engagement) => (
                 <option key={engagement.id} value={engagement.id}>
@@ -150,7 +156,13 @@ export const AppShell: React.FC<AppShellProps> = ({
               disabled={isDemoMode || contextLoading || assessments.length === 0}
             >
               {assessments.length === 0 && (
-                <option value="">No assessment available</option>
+                <option value="">
+                  {contextError
+                    ? 'Context unavailable'
+                    : contextLoading
+                      ? 'Loading assessments…'
+                      : 'No assessment available'}
+                </option>
               )}
               {assessments.map((assessment) => (
                 <option key={assessment.id} value={assessment.id}>

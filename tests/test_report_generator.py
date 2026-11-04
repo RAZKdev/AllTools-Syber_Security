@@ -43,6 +43,14 @@ def sample_data():
             inScope=False,
             notes="Excluded",
         ),
+        ScopeItem(
+            id="SCP-03",
+            engagementId="ENG-TEST",
+            type=ScopeType.DOMAIN,
+            value="old.lab.local",
+            inScope=True,
+            expiresAt=datetime(2020, 1, 1, tzinfo=timezone.utc),
+        ),
     ]
     findings = [
         Finding(
@@ -83,6 +91,8 @@ def test_generate_markdown_report(sample_data):
     assert "## 7. Cryptographic Evidence Log" in md
     assert "FND-01" in md
     assert "EVD-01" in md
+    assert "**EXPIRED (Not Authorized)**" in md
+    assert "Expired rules cannot authorize a target" in md
     assert "e3b0c44298fc1c14..." in md
 
 

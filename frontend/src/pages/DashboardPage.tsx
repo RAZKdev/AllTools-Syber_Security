@@ -44,6 +44,8 @@ interface DashboardPageProps {
   assessment: Assessment | null;
   connectionState: BackendConnectionState;
   contextLoading?: boolean;
+  contextError?: string | null;
+  onRetryContext?: () => void;
   refreshToken?: number;
   onNavigateTab: (tab: ActiveTab) => void;
 }
@@ -69,6 +71,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   assessment,
   connectionState,
   contextLoading = false,
+  contextError = null,
+  onRetryContext,
   refreshToken = 0,
   onNavigateTab,
 }) => {
@@ -164,14 +168,18 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     {
       key: 'severity',
       label: 'Severity',
-      width: '100px',
+      width: '80px',
       render: (row) => <SeverityBadge severity={row.severity} size="sm" />,
     },
     {
       key: 'title',
       label: 'Issue type / title',
       render: (row) => (
-        <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+        <span
+          className="wb-cell-truncate"
+          title={row.title}
+          style={{ fontWeight: 600, color: 'var(--text-primary)' }}
+        >
           {row.title}
         </span>
       ),
@@ -179,7 +187,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     {
       key: 'ruleId',
       label: 'Rule',
-      width: '110px',
+      width: '100px',
       render: (row) => (
         <code style={{ color: 'var(--accent)', fontSize: '11px' }}>
           {row.ruleId || '—'}
@@ -195,7 +203,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     {
       key: 'assetId',
       label: 'Asset',
-      width: '100px',
+      width: '85px',
       render: (row) => <span className="wb-mono-muted">{row.assetId}</span>,
     },
   ];
@@ -204,7 +212,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     {
       key: 'executedAt',
       label: 'Time',
-      width: '115px',
+      width: '78px',
       render: (row) => (
         <span className="wb-mono-muted">
           {new Date(row.executedAt).toLocaleTimeString()}
@@ -214,7 +222,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     {
       key: 'id',
       label: 'Execution ID',
-      width: '115px',
+      width: '110px',
       render: (row) => (
         <code style={{ color: 'var(--text-primary)' }}>{row.id}</code>
       ),
@@ -222,7 +230,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     {
       key: 'ruleId',
       label: 'Module',
-      width: '110px',
+      width: '95px',
       render: (row) => (
         <code style={{ color: 'var(--accent)' }}>{row.ruleId}</code>
       ),
@@ -231,13 +239,19 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
       key: 'target',
       label: 'Target',
       render: (row) => (
-        <span style={{ fontFamily: 'var(--font-mono)' }}>{row.target}</span>
+        <span
+          className="wb-cell-truncate"
+          title={row.target}
+          style={{ fontFamily: 'var(--font-mono)', maxWidth: '110px' }}
+        >
+          {row.target}
+        </span>
       ),
     },
     {
       key: 'scopeDecision',
       label: 'Scope',
-      width: '85px',
+      width: '75px',
       render: (row) => (
         <span
           className="wb-chip"
@@ -264,7 +278,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     {
       key: 'status',
       label: 'Status',
-      width: '145px',
+      width: '110px',
       render: (row) => <StatusBadge status={row.status} size="sm" />,
     },
   ];
@@ -371,6 +385,18 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     return <StatePanel kind="loading" title="Loading workspace context…" />;
   }
 
+  if (contextError && !isDemoMode) {
+    return (
+      <StatePanel
+        kind={isOffline ? 'offline' : 'error'}
+        title="Workspace context unavailable"
+        description="The engagement and assessment lists could not be loaded, so the dashboard shows no operational data."
+        errorMessage={contextError}
+        onRetry={onRetryContext}
+      />
+    );
+  }
+
   if (!assessmentId && !isDemoMode) {
     return (
       <StatePanel
@@ -403,7 +429,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         title="Assessment context"
         footer={
           <span>
-            Session data is in-memory and resets when the backend restarts.
+            {isDemoMode
+              ? 'Metrics are static demo fixture values, not live backend records.'
+              : 'Metrics are read from backend records for the selected assessment.'}
           </span>
         }
       >
@@ -434,10 +462,14 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
         </div>
 
         <div className="wb-context-section">
-          <div className="wb-section-label">Session note</div>
+          <div className="wb-section-label">Data source</div>
           <div className="wb-context-note wb-context-note-row">
             <Database size={12} />
-            <span>In-memory only. Do not treat as permanent storage.</span>
+            <span>
+              {isDemoMode
+                ? 'DEMO fixtures — not live data.'
+                : 'Loaded from backend records for the selected assessment.'}
+            </span>
           </div>
         </div>
       </ContextSidebar>
@@ -445,7 +477,11 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
       <div className="wb-page-main">
         <PageHeader
           title="Dashboard"
-          description="Assessment context and defensive workbench entry points, backed by the local API."
+          description={
+            isDemoMode
+              ? 'Offline demo fixtures for visual exploration; no operational data is loaded.'
+              : 'Assessment context and defensive workbench entry points, backed by the local API.'
+          }
           isDemoMode={isDemoMode}
           meta={
             <>
@@ -469,6 +505,12 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                 type="button"
                 onClick={() => onNavigateTab('executions')}
                 className="wb-btn wb-btn-primary wb-btn-sm"
+                disabled={isDemoMode}
+                title={
+                  isDemoMode
+                    ? 'Check execution is disabled in Demo Mode. Fixture records are review-only.'
+                    : 'Open the execution launcher'
+                }
               >
                 <PlayCircle size={12} /> Run check
               </button>
@@ -490,7 +532,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                 area: 'findings',
               },
               {
-                label: 'Session executions',
+                label: 'Executions',
                 value: areaErrors.executions ? '—' : executions.length,
                 area: 'executions',
               },
@@ -597,7 +639,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                   {isDemoMode && <DemoBadge />}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span className="wb-toolbar-hint">Session only</span>
+                  <span className="wb-toolbar-hint">Audit trail</span>
                   <button
                     type="button"
                     onClick={loadData}
@@ -615,7 +657,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                     columns={executionColumns}
                     data={executions}
                     keyExtractor={(row) => row.id}
-                    emptyMessage="No execution records in this backend session."
+                    emptyMessage="No execution records recorded by the backend."
                   />,
                 )}
               </div>

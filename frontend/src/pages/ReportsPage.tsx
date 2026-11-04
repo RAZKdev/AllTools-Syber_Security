@@ -22,6 +22,8 @@ interface ReportsPageProps {
   assessmentId: string | null;
   connectionState: BackendConnectionState;
   contextLoading?: boolean;
+  contextError?: string | null;
+  onRetryContext?: () => void;
   refreshToken?: number;
   onNavigateTab?: (tab: ActiveTab) => void;
 }
@@ -31,6 +33,8 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
   assessmentId,
   connectionState,
   contextLoading = false,
+  contextError = null,
+  onRetryContext,
   refreshToken = 0,
   onNavigateTab,
 }) => {
@@ -106,6 +110,18 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
     return <StatePanel kind="loading" title="Loading workspace context…" />;
   }
 
+  if (contextError && !isDemoMode) {
+    return (
+      <StatePanel
+        kind={isOffline ? 'offline' : 'error'}
+        title="Workspace context unavailable"
+        description="The engagement and assessment lists could not be loaded, so no report content can be shown."
+        errorMessage={contextError}
+        onRetry={onRetryContext}
+      />
+    );
+  }
+
   if (!assessmentId && !isDemoMode) {
     return (
       <StatePanel
@@ -138,8 +154,9 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
         title="Reports & Audit"
         footer={
           <span>
-            Reports are generated from in-memory session data. Export before the
-            backend restarts.
+            {isDemoMode
+              ? 'Demo fixture report — not live data.'
+              : "Reports are generated from the backend's current records for the selected assessment."}
           </span>
         }
       >
@@ -212,7 +229,11 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
       <div className="wb-page-main">
         <PageHeader
           title="Reports & Audit"
-          description="Preview, download, and print reports that are actually returned by the backend."
+          description={
+            isDemoMode
+              ? 'Preview and download the static demo report fixture.'
+              : 'Preview, download, and print reports that are actually returned by the backend.'
+          }
           isDemoMode={isDemoMode}
           meta={
             <>
@@ -254,7 +275,9 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
               <div className="wb-toolbar-group" style={{ color: 'var(--status-warn-text)' }}>
                 <AlertCircle size={11} />
                 <span className="wb-toolbar-hint">
-                  In-memory session repository: export the report before stopping the backend.
+                {isDemoMode
+                  ? 'Demo report content comes from static fixtures, not the backend.'
+                  : 'Report data is read from the backend for the selected assessment.'}
                 </span>
               </div>
             </div>

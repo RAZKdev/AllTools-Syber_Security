@@ -1,11 +1,10 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Target,
   Plus,
   ShieldCheck,
   RefreshCw,
   Filter,
-  Info,
 } from 'lucide-react';
 import {
   api,
@@ -32,6 +31,8 @@ interface ScopePageProps {
   engagementId: string | null;
   connectionState: BackendConnectionState;
   contextLoading?: boolean;
+  contextError?: string | null;
+  onRetryContext?: () => void;
   refreshToken?: number;
   enforcementStatus?: EnforcementStatus;
   onScopeUpdated?: () => void;
@@ -54,12 +55,20 @@ function formatTimestamp(value?: string): string {
   return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString();
 }
 
+function formatDate(value?: string): string {
+  if (!value) return '—';
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleDateString();
+}
+
 export const ScopePage: React.FC<ScopePageProps> = ({
   isDemoMode,
   assessmentId,
   engagementId,
   connectionState,
   contextLoading = false,
+  contextError = null,
+  onRetryContext,
   refreshToken = 0,
   enforcementStatus = 'not_checked',
   onScopeUpdated,
@@ -85,11 +94,60 @@ export const ScopePage: React.FC<ScopePageProps> = ({
   const [newEnvironment, setNewEnvironment] = useState<string>('lab');
   const [newNotes, setNewNotes] = useState<string>('');
   const [actionError, setActionError] = useState<string | null>(null);
+  const addModalRef = useRef<HTMLDivElement>(null);
+  const addRuleButtonRef = useRef<HTMLButtonElement>(null);
 
   const isOffline =
     connectionState === 'offline' || connectionState === 'api_error';
   const cannotUseBackend =
     isDemoMode || isOffline || connectionState !== 'connected' || !assessmentId;
+
+  useEffect(() => {
+    if (!showAddModal) return;
+
+    const focusTimer = window.setTimeout(() => {
+      const initial =
+        addModalRef.current?.querySelector<HTMLElement>('#new-scope-value') ||
+        addModalRef.current?.querySelector<HTMLElement>(
+          'input, select, textarea',
+        ) ||
+        addModalRef.current?.querySelector<HTMLElement>('button');
+      initial?.focus();
+    }, 0);
+
+    const handleModalKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setShowAddModal(false);
+        return;
+      }
+      if (event.key !== 'Tab' || !addModalRef.current) return;
+
+      const focusable = Array.from(
+        addModalRef.current.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((element) => !element.hasAttribute('disabled'));
+      if (focusable.length === 0) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    window.addEventListener('keydown', handleModalKeyDown);
+    return () => {
+      window.clearTimeout(focusTimer);
+      window.removeEventListener('keydown', handleModalKeyDown);
+      addRuleButtonRef.current?.focus();
+    };
+  }, [showAddModal]);
 
   const fetchScope = useCallback(async () => {
     setLoading(true);
@@ -205,7 +263,7 @@ export const ScopePage: React.FC<ScopePageProps> = ({
     {
       key: 'id',
       label: 'Rule ID',
-      width: '110px',
+      width: '100px',
       render: (row) => (
         <code style={{ color: 'var(--text-primary)', fontWeight: 700 }}>
           {row.id}
@@ -215,7 +273,7 @@ export const ScopePage: React.FC<ScopePageProps> = ({
     {
       key: 'type',
       label: 'Type',
-      width: '100px',
+      width: '90px',
       render: (row) => (
         <code style={{ color: 'var(--accent)', fontSize: '11px' }}>{row.type}</code>
       ),
@@ -225,10 +283,13 @@ export const ScopePage: React.FC<ScopePageProps> = ({
       label: 'Value',
       render: (row) => (
         <span
+          className="wb-cell-truncate"
+          title={row.value}
           style={{
             fontFamily: 'var(--font-mono)',
             fontWeight: 600,
             color: 'var(--text-primary)',
+            maxWidth: '160px',
           }}
         >
           {row.value}
@@ -238,7 +299,7 @@ export const ScopePage: React.FC<ScopePageProps> = ({
     {
       key: 'policy',
       label: 'Policy',
-      width: '115px',
+      width: '100px',
       render: (row) => {
         const policy = policyOf(row);
         const tone =
@@ -260,7 +321,7 @@ export const ScopePage: React.FC<ScopePageProps> = ({
     {
       key: 'environment',
       label: 'Environment',
-      width: '110px',
+      width: '90px',
       render: (row) => (
         <span style={{ color: 'var(--text-secondary)' }}>
           {row.environment || '—'}
@@ -270,9 +331,10 @@ export const ScopePage: React.FC<ScopePageProps> = ({
     {
       key: 'expiresAt',
       label: 'Expires',
-      width: '145px',
+      width: '100px',
       render: (row) => (
         <span
+          title={formatTimestamp(row.expiresAt)}
           style={{
             fontFamily: 'var(--font-mono)',
             color: isExpired(row.expiresAt)
@@ -280,15 +342,8 @@ export const ScopePage: React.FC<ScopePageProps> = ({
               : 'var(--text-muted)',
           }}
         >
-          {formatTimestamp(row.expiresAt)}
+          {formatDate(row.expiresAt)}
         </span>
-      ),
-    },
-    {
-      key: 'notes',
-      label: 'Notes',
-      render: (row) => (
-        <span style={{ color: 'var(--text-muted)' }}>{row.notes || '—'}</span>
       ),
     },
   ];
@@ -336,6 +391,28 @@ export const ScopePage: React.FC<ScopePageProps> = ({
 
   if (contextLoading && !isDemoMode) {
     return <StatePanel kind="loading" title="Loading workspace context…" />;
+  }
+
+  if (contextError && !isDemoMode) {
+    return (
+      <StatePanel
+        kind={isOffline ? 'offline' : 'error'}
+        title="Workspace context unavailable"
+        description="The engagement and assessment lists could not be loaded, so scope rules and the evaluator are unavailable."
+        errorMessage={contextError}
+        onRetry={onRetryContext}
+      />
+    );
+  }
+
+  if (!engagementId && !isDemoMode) {
+    return (
+      <StatePanel
+        kind="empty"
+        title="No engagement available"
+        description="Scope rules require an engagement from the backend. No scope data is shown until an engagement is selected."
+      />
+    );
   }
 
   if (loading) {
@@ -406,6 +483,7 @@ export const ScopePage: React.FC<ScopePageProps> = ({
         <div className="wb-context-section">
           <button
             type="button"
+            ref={addRuleButtonRef}
             className="wb-btn wb-btn-primary wb-btn-sm"
             onClick={handleOpenAdd}
             disabled={isDemoMode || isOffline || !engagementId}
@@ -420,8 +498,9 @@ export const ScopePage: React.FC<ScopePageProps> = ({
             <Plus size={12} /> Add scope rule
           </button>
           <p className="wb-context-note">
-            Adding a rule is a high-impact action and requires confirmation.
-            The backend remains the final authority.
+            {isDemoMode
+              ? 'Scope changes are disabled in Demo Mode. Fixtures cannot modify scope.'
+              : 'Adding a rule is a high-impact action and requires confirmation. The backend remains the final authority.'}
           </p>
         </div>
       </ContextSidebar>
@@ -429,7 +508,11 @@ export const ScopePage: React.FC<ScopePageProps> = ({
       <div className="wb-page-main">
         <PageHeader
           title="Scope Guard"
-          description="Backend enforcement; default deny. Inspect authorized boundaries without simulating a decision."
+          description={
+            isDemoMode
+              ? 'Demo fixtures only. Evaluation and scope changes are disabled; no decision can be made from this screen.'
+              : 'Every decision comes from the backend. Inspect authorized boundaries without simulating a decision in the UI.'
+          }
           isDemoMode={isDemoMode}
           meta={
             <>
@@ -445,7 +528,11 @@ export const ScopePage: React.FC<ScopePageProps> = ({
                       ? 'n/a (demo)'
                       : enforcementStatus === 'unavailable'
                         ? 'Unavailable'
-                        : 'Not verified'}
+                        : enforcementStatus === 'checking'
+                          ? 'Checking…'
+                          : enforcementStatus === 'probe_allowed'
+                            ? 'Unverified'
+                            : 'Not checked'}
                 </strong>
               </span>
             </>
@@ -493,7 +580,9 @@ export const ScopePage: React.FC<ScopePageProps> = ({
                 </div>
                 <span className="wb-toolbar-spacer" />
                 <span className="wb-toolbar-hint">
-                  Backend source: {isDemoMode ? 'DEMO fixture' : 'GET /scope/items'}
+                  {isDemoMode
+                    ? 'Source: DEMO fixture'
+                    : 'Backend source: GET /scope/items'}
                 </span>
               </div>
               <div className="wb-panel-body">
@@ -523,17 +612,24 @@ export const ScopePage: React.FC<ScopePageProps> = ({
             <div className="wb-panel-header">
               <div className="wb-panel-title">
                 <ShieldCheck size={14} color="var(--accent)" />
-                <span>Evaluate a target against the backend</span>
+                <span>
+                  {isDemoMode
+                    ? 'Demo evaluation (disabled)'
+                    : 'Evaluate a target against the backend'}
+                </span>
               </div>
               <span className="wb-toolbar-hint">
-                POST /scope/evaluate · read-only
+                {isDemoMode
+                  ? 'DEMO fixture · no request'
+                  : 'POST /scope/evaluate · read-only'}
               </span>
             </div>
 
             <div className="wb-panel-body wb-evaluator-body">
               <p className="wb-evaluator-description">
-                Decisions are returned by the backend Scope Guard. This workbench
-                never computes an ALLOW/BLOCK result in the browser.
+                {isDemoMode
+                  ? 'Evaluation is disabled in Demo Mode. Fixture decisions are static and cannot authorize any action.'
+                  : 'Decisions are returned by the backend Scope Guard. This workbench never computes an ALLOW/BLOCK result in the browser.'}
               </p>
 
               <form className="wb-evaluator-form" onSubmit={handleEvaluate}>
@@ -573,19 +669,14 @@ export const ScopePage: React.FC<ScopePageProps> = ({
                     </>
                   ) : (
                     <>
-                      <ShieldCheck size={13} /> Evaluate against backend
+                      <ShieldCheck size={13} />{' '}
+                      {isDemoMode
+                        ? 'Evaluation disabled'
+                        : 'Evaluate against backend'}
                     </>
                   )}
                 </button>
               </form>
-
-              {isDemoMode && (
-                <div className="wb-inline-note">
-                  <Info size={12} />
-                  Demo Mode: evaluation is disabled. The sample decision shown in
-                  fixtures is static and cannot authorize any action.
-                </div>
-              )}
 
               {evalError && (
                 <div className="wb-alert error" role="alert">
@@ -615,6 +706,7 @@ export const ScopePage: React.FC<ScopePageProps> = ({
             role="dialog"
             aria-modal="true"
             aria-labelledby="add-scope-title"
+            ref={addModalRef}
             onClick={(event) => event.stopPropagation()}
           >
             <div className="wb-modal-header">
@@ -749,8 +841,8 @@ export const ScopePage: React.FC<ScopePageProps> = ({
               <div><strong>Environment:</strong> {newEnvironment}</div>
             </div>
             <p className="wb-confirm-note">
-              The backend stores this rule in its in-memory repository. It is not
-              permanent and resets when the backend restarts.
+              The backend stores this rule in its repository for this engagement.
+              Scope Guard will apply it to future evaluations.
             </p>
           </div>
         }

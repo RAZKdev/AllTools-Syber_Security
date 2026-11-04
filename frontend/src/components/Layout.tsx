@@ -1,6 +1,8 @@
 import React from 'react';
 import { Shield, LayoutDashboard, Target, PlayCircle, Settings, FileText, AlertTriangle } from 'lucide-react';
 
+// Legacy shell kept for reference only. The mounted application shell is AppShell.
+
 export type ActiveTab = 'dashboard' | 'scope' | 'executions' | 'findings' | 'reports';
 
 interface LayoutProps {
@@ -13,7 +15,7 @@ interface LayoutProps {
 export const Layout: React.FC<LayoutProps> = ({
   currentTab,
   onTabChange,
-  activeEngagementName = 'Lab Engagement Alpha',
+  activeEngagementName = 'No active engagement',
   children,
 }) => {
   const navItems = [
@@ -76,8 +78,8 @@ export const Layout: React.FC<LayoutProps> = ({
             style={{
               padding: '10px 14px',
               borderRadius: '6px',
-              backgroundColor: 'rgba(16, 185, 129, 0.08)',
-              border: '1px solid rgba(16, 185, 129, 0.25)',
+              backgroundColor: 'var(--status-neutral-bg)',
+              border: '1px solid var(--status-neutral-border)',
               display: 'flex',
               flexDirection: 'column',
               gap: '4px',
@@ -89,16 +91,15 @@ export const Layout: React.FC<LayoutProps> = ({
                   width: '8px',
                   height: '8px',
                   borderRadius: '50%',
-                  backgroundColor: 'var(--status-pass-text)',
-                  boxShadow: '0 0 8px rgba(52, 211, 153, 0.6)',
+                  backgroundColor: 'var(--status-neutral-text)',
                 }}
               />
-              <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--status-pass-text)', letterSpacing: '0.05em' }}>
-                SCOPE GUARD ACTIVE
+              <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--status-neutral-text)', letterSpacing: '0.05em' }}>
+                ENFORCEMENT UNVERIFIED
               </span>
             </div>
             <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-              Fail-Closed / Default Deny
+              Status is reported by the live workbench shell
             </span>
           </div>
         </div>
@@ -142,7 +143,7 @@ export const Layout: React.FC<LayoutProps> = ({
         {/* Bottom Profile / Settings */}
         <div style={{ padding: '16px 20px', borderTop: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: '10px' }}>
           <Settings size={16} color="var(--text-muted)" />
-          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Defensive Mode: Authorized</span>
+          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Authorization is enforced by the backend</span>
         </div>
       </aside>
 
@@ -178,7 +179,7 @@ export const Layout: React.FC<LayoutProps> = ({
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '12px', color: 'var(--text-muted)' }}>
-            <span>Backend API: <strong style={{ color: 'var(--status-pass-text)' }}>Connected</strong></span>
+            <span>Backend connection is reported by the live status bar.</span>
           </div>
         </header>
 
