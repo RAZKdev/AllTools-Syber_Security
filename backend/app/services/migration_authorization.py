@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -180,6 +181,38 @@ def verify_authorization_signature(
         raise AuthorizationSignatureError(f"Cryptographic signature verification failed: {e}") from e
 
 
+def load_ed25519_public_key(path: Path) -> ed25519.Ed25519PublicKey:
+    """
+    Load an independently pinned Ed25519 public key from PEM, OpenSSH, or raw hex.
+    Fails closed with AuthorizationKeyError on any parse or type mismatch.
+    """
+    key_path = Path(path)
+    try:
+        data = key_path.read_bytes()
+    except Exception as e:
+        raise AuthorizationKeyError(f"Failed to read pinned public key '{key_path}': {e}") from e
+
+    try:
+        if b"-----BEGIN" in data:
+            key = serialization.load_pem_public_key(data)
+        elif data.lstrip().startswith(b"ssh-ed25519"):
+            key = serialization.load_ssh_public_key(data)
+        else:
+            key = ed25519.Ed25519PublicKey.from_public_bytes(
+                bytes.fromhex(data.decode("ascii").strip())
+            )
+    except Exception as e:
+        raise AuthorizationKeyError(
+            f"Failed to load Ed25519 public key from '{key_path}': {e}"
+        ) from e
+
+    if not isinstance(key, ed25519.Ed25519PublicKey):
+        raise AuthorizationKeyError(
+            f"Pinned key '{key_path}' is not an Ed25519 public key."
+        )
+    return key
+
+
 class AuthorizationLedger:
     """
     Durable append-only consumption ledger guaranteeing one-time execution nonce enforcement
@@ -295,11 +328,17 @@ class ProductionMigrationAuthorizationGate:
         self,
         ledger: AuthorizationLedger,
         pinned_public_key: Optional[ed25519.Ed25519PublicKey] = None,
-        require_signature: bool = False,
     ) -> None:
+        if pinned_public_key is None:
+            raise AuthorizationKeyError(
+                "A pinned public key (Ed25519) is required to verify production migration authorization."
+            )
+        if not isinstance(pinned_public_key, ed25519.Ed25519PublicKey):
+            raise AuthorizationKeyError(
+                "Pinned public key must be an Ed25519 public key."
+            )
         self.ledger = ledger
         self.pinned_public_key = pinned_public_key
-        self.require_signature = require_signature
 
     def verify_and_consume(
         self,
@@ -333,15 +372,8 @@ class ProductionMigrationAuthorizationGate:
                 raise
             raise AuthorizationGateError(f"Invalid expiration timestamp format: {e}")
 
-        # 3. Cryptographic Signature Verification
-        if self.pinned_public_key is not None:
-            verify_authorization_signature(authorization, self.pinned_public_key)
-        elif self.require_signature or authorization.signature is not None:
-            if not authorization.signature:
-                raise AuthorizationSignatureError("Cryptographic signature is required but missing.")
-            if self.pinned_public_key is None:
-                raise AuthorizationKeyError("No pinned public key configured to verify token signature.")
-            verify_authorization_signature(authorization, self.pinned_public_key)
+        # 3. Cryptographic Signature Verification (fail closed; unsigned tokens are rejected)
+        verify_authorization_signature(authorization, self.pinned_public_key)
 
         # 4. One-time nonce check (verified atomically in consume_nonce)
         if self.ledger.is_consumed(authorization.one_time_nonce):

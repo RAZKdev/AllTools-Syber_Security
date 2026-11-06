@@ -114,8 +114,21 @@ class ArchiveManager:
 
     @staticmethod
     def _sanitize_segment(segment: str) -> str:
-        """Sanitize directory and file path components."""
-        return re.sub(r"[^a-zA-Z0-9_\-.]", "_", segment) or "default"
+        """Sanitize directory and file path components, rejecting dot-only segments."""
+        if not isinstance(segment, str) or not segment:
+            raise MigrationIntegrityError(
+                "Invalid path segment: empty path segments are strictly prohibited."
+            )
+        if set(segment) == {"."}:
+            raise MigrationIntegrityError(
+                f"Invalid path segment '{segment}': dot-only path segments are strictly prohibited."
+            )
+        safe = re.sub(r"[^a-zA-Z0-9_\-.]", "_", segment)
+        if not safe or set(safe) == {"."}:
+            raise MigrationIntegrityError(
+                f"Invalid path segment '{segment}': dot-only path segments are strictly prohibited."
+            )
+        return safe
 
     def get_target_path(
         self,
@@ -125,17 +138,31 @@ class ArchiveManager:
     ) -> Path:
         """
         Compute canonical target destination path in the archive structure.
+
+        Both segments are sanitized and the resolved path is verified to stay
+        inside the selected disposition root before it is returned.
         """
         safe_folder = self._sanitize_segment(parent_folder)
         safe_filename = self._sanitize_segment(filename)
 
         if primary_disposition == "HISTORICAL_ARCHIVE":
-            return self.historical_archive_dir / safe_folder / safe_filename
+            disposition_root = self.historical_archive_dir
         elif primary_disposition == "MALFORMED_PRESERVE":
-            return self.malformed_archive_dir / safe_folder / safe_filename
+            disposition_root = self.malformed_archive_dir
         else:
             # Default: LEGACY_TEST_ARCHIVE
-            return self.test_archive_dir / safe_folder / safe_filename
+            disposition_root = self.test_archive_dir
+
+        candidate = disposition_root / safe_folder / safe_filename
+        resolved_candidate = candidate.resolve()
+        try:
+            resolved_candidate.relative_to(disposition_root)
+        except ValueError as exc:
+            raise MigrationIntegrityError(
+                f"Resolved archive target '{resolved_candidate}' escapes disposition root "
+                f"'{disposition_root}'."
+            ) from exc
+        return candidate
 
     def verify_physical_target(
         self,

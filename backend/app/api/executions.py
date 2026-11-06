@@ -181,9 +181,12 @@ def compute_request_fingerprint(
     engagement_id: Optional[str] = None,
     asset_id: Optional[str] = None,
     simulated_data: Optional[Dict[str, Any]] = None,
+    *,
+    operation: str,
 ) -> str:
-    """Compute deterministic SHA-256 fingerprint of check execution parameters."""
+    """Compute deterministic SHA-256 fingerprint scoped to one execution operation."""
     canonical = {
+        "operation": operation,
         "assessmentId": assessment_id,
         "engagementId": engagement_id or "",
         "ruleId": rule_id,
@@ -265,6 +268,10 @@ def pre_flight_check(
             detail=f"Conflicting execution identifiers: 'Idempotency-Key' header ('{idempotency_key}') does not match 'id' field in request body ('{payload.id}').",
         )
     execution_id = idempotency_key or payload.id or f"CHK-{uuid.uuid4().hex[:8]}"
+    # Pre-flight records are audit-only and must never collide with run execution IDs.
+    preflight_execution_id = (
+        execution_id if execution_id.startswith("PRE-") else f"PRE-{execution_id}"
+    )
 
     assessment, engagement = validate_execution_authorization(
         payload.assessmentId, payload.engagementId, scope_repo=scope_repo
@@ -275,6 +282,7 @@ def pre_flight_check(
         rule_id=payload.ruleId,
         target=payload.target,
         engagement_id=payload.engagementId,
+        operation="pre-flight",
     )
 
     OFFLINE_ANALYSIS_RULES = {"SEC-AUTH-001", "SEC-CRYPTO-001"}
@@ -301,7 +309,7 @@ def pre_flight_check(
 
     if not decision.is_allowed:
         record = CheckExecution(
-            id=execution_id,
+            id=preflight_execution_id,
             assessmentId=payload.assessmentId,
             ruleId=payload.ruleId,
             target=payload.target,
@@ -326,7 +334,7 @@ def pre_flight_check(
         )
 
     record = CheckExecution(
-        id=execution_id,
+        id=preflight_execution_id,
         assessmentId=payload.assessmentId,
         ruleId=payload.ruleId,
         target=payload.target,
@@ -380,6 +388,7 @@ def run_check(
         engagement_id=payload.engagementId,
         asset_id=payload.assetId,
         simulated_data=payload.simulatedData,
+        operation="run",
     )
     now = datetime.now(timezone.utc)
 

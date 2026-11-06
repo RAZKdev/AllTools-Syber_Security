@@ -17,8 +17,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from cryptography.hazmat.primitives.asymmetric import ed25519
+
 from app.core.instance_lock import InstanceLock, MaintenanceSession, ProcessLockError
-from app.core.storage_paths import StoragePaths, get_storage_paths
+from app.core.storage_paths import (
+    StoragePaths,
+    get_storage_paths,
+    is_production_data_dir,
+)
 from app.services.archive_manager import ArchiveManager
 from app.services.jsonl_audit_outbox import JSONLAuditOutbox
 from app.services.migration_authorization import (
@@ -63,6 +69,7 @@ class MigrationEngine:
         maintenance_lock: Optional[InstanceLock] = None,
         fault_injector: Optional[Callable[[str], None]] = None,
         authorization: Optional[ProductionMigrationAuthorization] = None,
+        authorization_public_key: Optional[ed25519.Ed25519PublicKey] = None,
         authorization_ledger_path: Optional[Path] = None,
         inventory_file: Optional[Path] = None,
         plan_file: Optional[Path] = None,
@@ -105,6 +112,7 @@ class MigrationEngine:
         self._assert_safe_sandbox(
             target_data_dir=self.paths.data_dir,
             authorization=authorization,
+            authorization_public_key=authorization_public_key,
             authorization_ledger_path=authorization_ledger_path,
             inventory_file=inventory_file,
             plan_file=plan_file,
@@ -119,6 +127,7 @@ class MigrationEngine:
     def _assert_safe_sandbox(
         target_data_dir: Path,
         authorization: Optional[ProductionMigrationAuthorization] = None,
+        authorization_public_key: Optional[ed25519.Ed25519PublicKey] = None,
         authorization_ledger_path: Optional[Path] = None,
         inventory_file: Optional[Path] = None,
         plan_file: Optional[Path] = None,
@@ -132,14 +141,7 @@ class MigrationEngine:
         Fails closed on any discrepancy or missing authorization.
         """
         resolved_target = target_data_dir.resolve()
-
-        # Check against Windows LOCALAPPDATA default
-        local_app = os.environ.get("LOCALAPPDATA")
-        is_production = False
-        if local_app:
-            prod_dir = (Path(local_app) / "AllTools-CyberSec").resolve()
-            if resolved_target == prod_dir or str(resolved_target).startswith(str(prod_dir) + os.sep):
-                is_production = True
+        is_production = is_production_data_dir(resolved_target)
 
         if is_production:
             if authorization is None:
@@ -147,10 +149,17 @@ class MigrationEngine:
                     f"FATAL SAFETY VIOLATION: Execution against production data directory '{resolved_target}' "
                     "is strictly prohibited without a valid, verified ProductionMigrationAuthorization token."
                 )
+            if authorization_public_key is None:
+                raise MigrationSafetyError(
+                    "FATAL SAFETY VIOLATION: A pinned public key (Ed25519) is required to verify the "
+                    "ProductionMigrationAuthorization token. Unsigned or self-authored tokens are not accepted."
+                )
 
             ledger_path = authorization_ledger_path or (target_data_dir / "authorization_ledger.jsonl")
             ledger = AuthorizationLedger(ledger_path=ledger_path)
-            gate = ProductionMigrationAuthorizationGate(ledger)
+            gate = ProductionMigrationAuthorizationGate(
+                ledger, pinned_public_key=authorization_public_key
+            )
 
             src_dir = source_evidence_dir or (Path.cwd() / "database" / "evidence")
             inv_file = inventory_file or (src_dir / "legacy-evidence-inventory.json")
@@ -177,9 +186,16 @@ class MigrationEngine:
                 ) from e
         elif authorization is not None:
             # Synthetic/test sandbox with explicit authorization token provided for verification
+            if authorization_public_key is None:
+                raise MigrationSafetyError(
+                    "FATAL SAFETY VIOLATION: A pinned public key (Ed25519) is required to verify the "
+                    "ProductionMigrationAuthorization token. Unsigned or self-authored tokens are not accepted."
+                )
             ledger_path = authorization_ledger_path or (target_data_dir / "authorization_ledger.jsonl")
             ledger = AuthorizationLedger(ledger_path=ledger_path)
-            gate = ProductionMigrationAuthorizationGate(ledger)
+            gate = ProductionMigrationAuthorizationGate(
+                ledger, pinned_public_key=authorization_public_key
+            )
             src_dir = source_evidence_dir or (Path.cwd() / "database" / "evidence")
             inv_file = inventory_file or (src_dir / "legacy-evidence-inventory.json")
             if plan_file is None:

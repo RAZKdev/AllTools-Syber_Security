@@ -660,6 +660,20 @@ def test_scenario_17_target_path_outside_archive_root(manifest_sandbox):
     assert "escapes approved archive root" in str(exc_info.value)
 
 
+@pytest.mark.parametrize("dot_segment", [".", "..", "..."])
+def test_scenario_17b_dot_only_path_segments_rejected(manifest_sandbox, dot_segment):
+    """Dot-only path components must be rejected instead of resolving outside the disposition root."""
+    archive_mgr = manifest_sandbox["archive_mgr"]
+
+    with pytest.raises(MigrationIntegrityError) as parent_exc:
+        archive_mgr.get_target_path("HISTORICAL_ARCHIVE", dot_segment, "EVD-dot.json")
+    assert "dot-only" in str(parent_exc.value).lower() or "invalid path segment" in str(parent_exc.value).lower()
+
+    with pytest.raises(MigrationIntegrityError) as filename_exc:
+        archive_mgr.get_target_path("HISTORICAL_ARCHIVE", "ASM-01", dot_segment)
+    assert "dot-only" in str(filename_exc.value).lower() or "invalid path segment" in str(filename_exc.value).lower()
+
+
 def test_scenario_18_reparse_point_or_symlink_target_rejection(manifest_sandbox):
     """Scenario 18: Reparse point or symlink target rejection raises MigrationIntegrityError."""
     archive_mgr = manifest_sandbox["archive_mgr"]

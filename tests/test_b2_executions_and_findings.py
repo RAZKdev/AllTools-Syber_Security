@@ -226,6 +226,68 @@ def test_b2_03_duplicate_execution_idempotency_and_replay(b2_sandbox):
         assert count == 1
 
 
+def test_b2_03b_preflight_pass_cannot_be_replayed_as_run(b2_sandbox, monkeypatch):
+    """
+    Regression: a pre-flight PASS record must never satisfy /executions/run
+    with the same client-supplied execution ID. The run must actually execute.
+    """
+    _seed_running_assessment(
+        b2_sandbox,
+        eng_id="ENG-B2-03B",
+        asm_id="ASM-B2-03B",
+        scope_val="example.com",
+    )
+    client = b2_sandbox["client"]
+    exec_repo = b2_sandbox["exec_repo"]
+    execution_id = "CHK-PREFLIGHT-REPLAY-01"
+
+    preflight_resp = client.post(
+        "/api/v1/executions/pre-flight",
+        json={
+            "id": execution_id,
+            "assessmentId": "ASM-B2-03B",
+            "engagementId": "ENG-B2-03B",
+            "ruleId": "SEC-WEB-001",
+            "target": "example.com",
+        },
+    )
+    assert preflight_resp.status_code == 200, preflight_resp.text
+    assert preflight_resp.json()["allowed"] is True
+    assert preflight_resp.json()["executionRecord"]["status"] == "PASS"
+
+    tool_invoked = {"value": False}
+
+    from security.rules.web.sec_web_001 import SecWeb001Rule
+
+    def mock_evaluate(*args, **kwargs):
+        tool_invoked["value"] = True
+        return ExecutionStatus.PASS, {}, {}, {}
+
+    monkeypatch.setattr(SecWeb001Rule, "evaluate", mock_evaluate)
+
+    run_resp = client.post(
+        "/api/v1/executions/run",
+        json={
+            "id": execution_id,
+            "assessmentId": "ASM-B2-03B",
+            "engagementId": "ENG-B2-03B",
+            "ruleId": "SEC-WEB-001",
+            "target": "example.com",
+        },
+    )
+    assert run_resp.status_code == 200, run_resp.text
+    assert tool_invoked["value"] is True, (
+        "A pre-flight PASS record must not be replayed by /executions/run; "
+        "the security tool must actually execute."
+    )
+    assert "Idempotent replay" not in run_resp.json()["message"]
+
+    preflight_record_id = preflight_resp.json()["executionRecord"]["id"]
+    assert preflight_record_id != execution_id
+    assert exec_repo.get_execution(preflight_record_id) is not None
+    assert exec_repo.get_execution(execution_id) is not None
+
+
 def test_b2_04_execution_conflict_and_immutability(b2_sandbox):
     """
     4. Execution Conflict & Immutability (P1):

@@ -30,7 +30,7 @@ import subprocess
 import time
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from pydantic import BaseModel, Field
@@ -367,6 +367,47 @@ class ArchiveBackupManager:
             })
         return cleaned
 
+    @staticmethod
+    def _resolve_manifest_member(base_dir: Path, relative_path: str) -> Path:
+        """
+        Resolve a manifest relative_path inside base_dir and reject traversal.
+
+        Manifests are untrusted input during restore. Absolute paths, drive
+        prefixes, dot-only components, and any resolved path outside base_dir
+        are rejected before reading or writing anything.
+        """
+        normalized = str(relative_path).replace("\\", "/")
+        if not normalized:
+            raise ArchiveRestoreError("Unsafe manifest relative path: empty path is prohibited.")
+
+        pure = PurePosixPath(normalized)
+        if pure.is_absolute() or pure.anchor:
+            raise ArchiveRestoreError(
+                f"Unsafe manifest relative path '{relative_path}': absolute paths are prohibited."
+            )
+        if len(pure.parts) > 0 and len(pure.parts[0]) == 2 and pure.parts[0][1] == ":":
+            raise ArchiveRestoreError(
+                f"Unsafe manifest relative path '{relative_path}': drive prefixes are prohibited."
+            )
+        if any(part in ("", ".", "..") for part in pure.parts):
+            raise ArchiveRestoreError(
+                f"Unsafe manifest relative path '{relative_path}': path traversal is prohibited."
+            )
+
+        resolved_base = Path(base_dir).resolve()
+        candidate = (resolved_base / normalized).resolve()
+        if candidate == resolved_base:
+            raise ArchiveRestoreError(
+                f"Unsafe manifest relative path '{relative_path}': path must name a file."
+            )
+        try:
+            candidate.relative_to(resolved_base)
+        except ValueError as exc:
+            raise ArchiveRestoreError(
+                f"Unsafe manifest relative path '{relative_path}': path escapes '{resolved_base}'."
+            ) from exc
+        return candidate
+
     def validate_and_restore(
         self,
         backup_dir: Path,
@@ -391,9 +432,18 @@ class ArchiveBackupManager:
         restored_files = 0
         restored_bytes = 0
 
+        # Validate every manifest member against both roots before touching files.
+        validated_members = [
+            (
+                entry,
+                self._resolve_manifest_member(b_dir, entry.relative_path),
+                self._resolve_manifest_member(dest_restore, entry.relative_path),
+            )
+            for entry in manifest.files
+        ]
+
         # Step 1: Pre-restore verification of backup files
-        for entry in manifest.files:
-            b_file = b_dir / entry.relative_path
+        for entry, b_file, _ in validated_members:
             if not b_file.exists():
                 raise ArchiveRestoreError(f"Backup file missing: '{entry.relative_path}'")
             actual_sha, actual_size = self._compute_sha256_and_size(b_file)
@@ -404,9 +454,7 @@ class ArchiveBackupManager:
             verified_files += 1
 
         # Step 2: Restore files into destination
-        for entry in manifest.files:
-            b_file = b_dir / entry.relative_path
-            r_file = dest_restore / entry.relative_path
+        for entry, b_file, r_file in validated_members:
             r_file.parent.mkdir(parents=True, exist_ok=True)
 
             dst_sha, dst_size = self._stream_copy_with_hash(b_file, r_file)
@@ -700,9 +748,18 @@ class ArchiveBackupManager:
         restored_files = 0
         restored_bytes = 0
 
+        # Validate every manifest member against both roots before touching files.
+        validated_members = [
+            (
+                entry,
+                self._resolve_manifest_member(b_dir, entry.relative_path),
+                self._resolve_manifest_member(dest_restore, entry.relative_path),
+            )
+            for entry in manifest.files
+        ]
+
         # Pre-restore verification
-        for entry in manifest.files:
-            b_file = b_dir / entry.relative_path
+        for entry, b_file, _ in validated_members:
             if not b_file.exists():
                 raise ArchiveRestoreError(f"Backup file missing: '{entry.relative_path}'")
             act_sha, act_size = self._compute_sha256_and_size(b_file)
@@ -713,9 +770,7 @@ class ArchiveBackupManager:
             verified_files += 1
 
         # Restore
-        for entry in manifest.files:
-            b_file = b_dir / entry.relative_path
-            r_file = dest_restore / entry.relative_path
+        for entry, b_file, r_file in validated_members:
             r_file.parent.mkdir(parents=True, exist_ok=True)
             dst_sha, dst_size = self._stream_copy_with_hash(b_file, r_file)
             if dst_sha != entry.sha256 or dst_size != entry.byte_size:

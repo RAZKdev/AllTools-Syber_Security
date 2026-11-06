@@ -388,6 +388,52 @@ def test_source_backup_isolated_restore_validation(synthetic_e0_source, tmp_path
         assert hashlib.sha256(rf.read_bytes()).hexdigest() == entry.sha256
 
 
+def test_source_backup_restore_rejects_manifest_relative_path_traversal(
+    synthetic_e0_source, tmp_path: Path
+):
+    """A tampered source-backup manifest must not write outside the restore target."""
+    backup_root = tmp_path / "external_backups"
+
+    def mock_distinct_disks(p: Path) -> str:
+        return "0:SRC" if "source_evidence" in str(p) else "1:TGT"
+
+    mgr = ArchiveBackupManager(
+        archive_root=synthetic_e0_source["src_dir"],
+        custom_disk_resolver=mock_distinct_disks,
+    )
+    manifest = mgr.create_source_evidence_backup(
+        source_evidence_root=synthetic_e0_source["src_dir"],
+        inventory_file=synthetic_e0_source["inv_path"],
+        target_backup_root=backup_root,
+        generation_id="SEBKP-TRAVERSAL-TEST",
+    )
+
+    backup_dir = Path(manifest.target_backup_dir)
+    manifest_file = backup_dir / "source_backup_manifest.json"
+    manifest_data = json.loads(manifest_file.read_text(encoding="utf-8"))
+
+    escaped_payload = b'{"escaped": "source-restore-traversal"}'
+    escaped_backup_file = backup_root / "escaped_source.json"
+    escaped_backup_file.write_bytes(escaped_payload)
+
+    manifest_data["files"][0]["relative_path"] = "../escaped_source.json"
+    manifest_data["files"][0]["sha256"] = hashlib.sha256(escaped_payload).hexdigest()
+    manifest_data["files"][0]["byte_size"] = len(escaped_payload)
+    manifest_file.write_text(json.dumps(manifest_data), encoding="utf-8")
+
+    restore_target = tmp_path / "source_restore_target"
+    escaped_restore_path = tmp_path / "escaped_source.json"
+
+    with pytest.raises(ArchiveRestoreError) as exc_info:
+        mgr.validate_and_restore_source_backup(
+            backup_dir=backup_dir,
+            target_restore_dir=restore_target,
+        )
+
+    assert "relative path" in str(exc_info.value).lower() or "traversal" in str(exc_info.value).lower()
+    assert not escaped_restore_path.exists()
+
+
 # ============================================================================
 # TASK 4 & 5: CRYPTOGRAPHIC AUTHORIZATION & STORAGE BINDINGS TESTS
 # ============================================================================
@@ -581,7 +627,7 @@ def test_crypto_concurrent_duplicate_nonce_consumption(tmp_path: Path):
     assert all(isinstance(e, AuthorizationConsumedError) for e in errors)
 
 
-def test_crypto_task5_dual_device_same_physical_disk_fails(synthetic_e0_source, tmp_path: Path):
+def test_crypto_task5_dual_device_same_physical_disk_fails(synthetic_e0_source, tmp_path: Path, crypto_keys):
     """Task 5: When archive disk ID and backup disk ID are identical, gate fails closed."""
     dest_dir = tmp_path / "runtime"
     dest_dir.mkdir()
@@ -590,7 +636,7 @@ def test_crypto_task5_dual_device_same_physical_disk_fails(synthetic_e0_source, 
     plan_sha = hashlib.sha256(plan_file.read_bytes()).hexdigest()
 
     ledger = AuthorizationLedger(tmp_path / "ledger.jsonl")
-    gate = ProductionMigrationAuthorizationGate(ledger)
+    gate = ProductionMigrationAuthorizationGate(ledger, pinned_public_key=crypto_keys["pub"])
 
     now = datetime.now(timezone.utc)
     token = ProductionMigrationAuthorization(
@@ -617,6 +663,7 @@ def test_crypto_task5_dual_device_same_physical_disk_fails(synthetic_e0_source, 
         backup_destination_volume_id="VOL-GUID-2",
         backup_destination_disk_id="0:RX7_SERIAL_128GB",  # SAME DISK!
     )
+    token = sign_authorization_token(token, crypto_keys["priv"], public_key_id="KEY-DUAL-001")
 
     with pytest.raises(AuthorizationDeviceMismatchError) as exc_info:
         gate.verify_and_consume(
@@ -629,7 +676,7 @@ def test_crypto_task5_dual_device_same_physical_disk_fails(synthetic_e0_source, 
     assert "Physical Storage Independence Violation" in str(exc_info.value)
 
 
-def test_crypto_task5_dual_device_distinct_disks_passes(synthetic_e0_source, tmp_path: Path):
+def test_crypto_task5_dual_device_distinct_disks_passes(synthetic_e0_source, tmp_path: Path, crypto_keys):
     """Task 5: When archive disk ID and backup disk ID are distinct, gate validation passes."""
     dest_dir = tmp_path / "runtime"
     dest_dir.mkdir()
@@ -638,7 +685,7 @@ def test_crypto_task5_dual_device_distinct_disks_passes(synthetic_e0_source, tmp
     plan_sha = hashlib.sha256(plan_file.read_bytes()).hexdigest()
 
     ledger = AuthorizationLedger(tmp_path / "ledger.jsonl")
-    gate = ProductionMigrationAuthorizationGate(ledger)
+    gate = ProductionMigrationAuthorizationGate(ledger, pinned_public_key=crypto_keys["pub"])
 
     now = datetime.now(timezone.utc)
     token = ProductionMigrationAuthorization(
@@ -664,6 +711,7 @@ def test_crypto_task5_dual_device_distinct_disks_passes(synthetic_e0_source, tmp
         backup_destination_volume_id="VOL-GUID-2",
         backup_destination_disk_id="1:SAMSUNG_T7_500GB",  # DISTINCT DISK!
     )
+    token = sign_authorization_token(token, crypto_keys["priv"], public_key_id="KEY-DUAL-002")
 
     res = gate.verify_and_consume(
         authorization=token,
@@ -675,7 +723,7 @@ def test_crypto_task5_dual_device_distinct_disks_passes(synthetic_e0_source, tmp
     assert res["status"] == "AUTHORIZATION_VERIFIED_AND_CONSUMED"
 
 
-def test_crypto_backup_device_substitution_fails(synthetic_e0_source, tmp_path: Path):
+def test_crypto_backup_device_substitution_fails(synthetic_e0_source, tmp_path: Path, crypto_keys):
     """Task 5: If backup volume GUID is substituted, gate fails closed."""
     dest_dir = tmp_path / "runtime"
     dest_dir.mkdir()
@@ -684,7 +732,7 @@ def test_crypto_backup_device_substitution_fails(synthetic_e0_source, tmp_path: 
     plan_sha = hashlib.sha256(plan_file.read_bytes()).hexdigest()
 
     ledger = AuthorizationLedger(tmp_path / "ledger.jsonl")
-    gate = ProductionMigrationAuthorizationGate(ledger)
+    gate = ProductionMigrationAuthorizationGate(ledger, pinned_public_key=crypto_keys["pub"])
 
     now = datetime.now(timezone.utc)
     token = ProductionMigrationAuthorization(
@@ -710,6 +758,7 @@ def test_crypto_backup_device_substitution_fails(synthetic_e0_source, tmp_path: 
         backup_destination_volume_id="EXPECTED-BACKUP-GUID",
         backup_destination_disk_id="1:EXT_DISK",
     )
+    token = sign_authorization_token(token, crypto_keys["priv"], public_key_id="KEY-DUAL-003")
 
     # Resolver returns a substituted volume GUID
     def mock_backup_resolver(p: Path) -> str:

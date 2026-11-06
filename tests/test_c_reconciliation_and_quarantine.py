@@ -14,7 +14,7 @@ from app.schemas.engagement import EngagementCreate
 from app.schemas.evidence import EvidenceCreate, EvidenceType
 from app.schemas.quarantine import QuarantineReason
 from app.services.durable_evidence_writer import DurableEvidenceWriter
-from app.services.quarantine_service import QuarantineService
+from app.services.quarantine_service import QuarantineError, QuarantineService
 from app.services.evidence_reconciliation import EvidenceIntegrityReconciler
 
 
@@ -174,6 +174,36 @@ def test_quarantine_item_recovery(recon_env):
     updated_q = q_service.inspect_quarantine(q_item.quarantineId)
     assert updated_q.recoveredAt is not None
     assert updated_q.recoveryTargetId == asm.id
+
+
+def test_quarantine_recovery_rejects_path_traversal_assessment_id(recon_env):
+    """Recovery must not join an untrusted assessment ID into the evidence path."""
+    q_service: QuarantineService = recon_env["quarantine_service"]
+    paths: StoragePaths = recon_env["paths"]
+
+    temp_dir = paths.data_dir / "temp_files"
+    temp_dir.mkdir(exist_ok=True)
+    source_file = temp_dir / "traversal_recovery.json"
+    source_file.write_bytes(b'{"analysis": "must_stay_inside_evidence_root"}')
+
+    q_item = q_service.quarantine_file(
+        source_path=source_file,
+        reason=QuarantineReason.MANUAL_QUARANTINE,
+    )
+
+    class _AcceptingEvidenceRepo:
+        def create_evidence(self, data, sync_status="COMMITTED"):
+            return data
+
+    with pytest.raises(QuarantineError, match="assessment|invalid|path"):
+        q_service.recover_item(
+            quarantine_id=q_item.quarantineId,
+            target_assessment_id="../temp_files",
+            evidence_repo=_AcceptingEvidenceRepo(),
+        )
+
+    assert Path(q_item.quarantinePath).exists()
+    assert not list(temp_dir.glob("EVD-*.json"))
 
 
 def test_integrity_reconciler_comprehensive(recon_env):

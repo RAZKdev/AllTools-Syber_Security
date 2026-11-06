@@ -48,11 +48,17 @@ from app.services.migration_recovery_service import MigrationRecoveryService
 
 
 @pytest.fixture
-def isolated_env(tmp_path: Path):
+def isolated_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """
     Creates an isolated synthetic test environment with clean SQLite schema,
     synthetic source evidence, sandboxed storage paths, and acquired MaintenanceSession.
+
+    The session-wide conftest sets ALLTOOLS_DATA_DIR to tmp_path for isolation. These
+    tests pass explicit StoragePaths, so the override is removed here to keep the
+    sandbox from being classified as the configured production data directory.
     """
+    monkeypatch.delenv("ALLTOOLS_DATA_DIR", raising=False)
+
     source_dir = tmp_path / "source_evidence"
     source_dir.mkdir(parents=True)
 

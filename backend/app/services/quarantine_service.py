@@ -207,6 +207,53 @@ class QuarantineService:
         """List all quarantined entries in the ledger."""
         return self.quarantine_repo.list_quarantine_items()
 
+    @staticmethod
+    def _validate_assessment_id(target_assessment_id: str) -> str:
+        """
+        Validate an assessment ID before it is used as a path component.
+
+        Assessment IDs are identifiers, never paths. Reject empty values,
+        separators, drive prefixes, dot-only names, and control characters.
+        """
+        if not isinstance(target_assessment_id, str) or not target_assessment_id:
+            raise QuarantineError("Invalid assessment ID: empty identifiers are prohibited.")
+        if len(target_assessment_id) > 128:
+            raise QuarantineError("Invalid assessment ID: identifier is too long.")
+        if target_assessment_id in (".", "..") or set(target_assessment_id) == {"."}:
+            raise QuarantineError(
+                "Invalid assessment ID: dot-only identifiers are prohibited."
+            )
+        if any(ch in ("/", "\\", ":", "\x00") for ch in target_assessment_id):
+            raise QuarantineError(
+                "Invalid assessment ID: path separators and drive prefixes are prohibited."
+            )
+        if any(ord(ch) < 32 or ord(ch) == 127 for ch in target_assessment_id):
+            raise QuarantineError(
+                "Invalid assessment ID: control characters are prohibited."
+            )
+        if target_assessment_id != target_assessment_id.strip() or " " in target_assessment_id:
+            raise QuarantineError(
+                "Invalid assessment ID: whitespace is prohibited."
+            )
+        return target_assessment_id
+
+    def _resolve_evidence_destination(self, target_assessment_id: str) -> Path:
+        """Resolve and verify the recovery destination stays inside the evidence root."""
+        safe_id = self._validate_assessment_id(target_assessment_id)
+        evidence_root = self.paths.evidence_dir.resolve()
+        dest_dir = (evidence_root / safe_id).resolve()
+        if dest_dir == evidence_root:
+            raise QuarantineError(
+                "Invalid assessment ID: recovery destination must be inside the evidence root."
+            )
+        try:
+            dest_dir.relative_to(evidence_root)
+        except ValueError as exc:
+            raise QuarantineError(
+                "Invalid assessment ID: recovery destination escapes the evidence root."
+            ) from exc
+        return dest_dir
+
     def recover_item(
         self,
         quarantine_id: str,
@@ -220,6 +267,9 @@ class QuarantineService:
         Requires explicit operator destination and target assessment ID.
         Coordinated through WriteFence with transactional rollback on failure.
         """
+        # Validate before acquiring the write fence or moving any file.
+        self._validate_assessment_id(target_assessment_id)
+
         with self.write_fence.acquire_write():
             item = self.quarantine_repo.get_quarantine_item(quarantine_id)
             if not item:
@@ -230,7 +280,7 @@ class QuarantineService:
                 raise QuarantineError(f"Quarantine file missing at {item.quarantinePath}")
 
             # Destination inside evidence directory for target assessment
-            dest_dir = self.paths.evidence_dir / target_assessment_id
+            dest_dir = self._resolve_evidence_destination(target_assessment_id)
             dest_dir.mkdir(parents=True, exist_ok=True)
             new_ev_id = f"EVD-{uuid.uuid4().hex[:8]}"
             dest_file = dest_dir / f"{new_ev_id}.json"

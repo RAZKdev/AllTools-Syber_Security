@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Optional
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric import ed25519
 
 from app.core.instance_lock import InstanceLock, MaintenanceSession, ProcessLockError
 from app.core.storage_paths import StoragePaths
@@ -52,9 +53,16 @@ from app.services.migration_authorization import (
     AuthorizationVolumeError,
     ProductionMigrationAuthorization,
     ProductionMigrationAuthorizationGate,
+    sign_authorization_token,
 )
 from app.services.migration_engine import MigrationEngine
 from app.services.migration_models import MigrationSafetyError
+
+
+@pytest.fixture
+def auth_key():
+    """Generate an isolated Ed25519 keypair for authorization token tests."""
+    return ed25519.Ed25519PrivateKey.generate()
 
 
 @pytest.fixture
@@ -275,6 +283,42 @@ def test_archive_restore_fails_on_corrupted_backup(synthetic_archive, tmp_path: 
     assert "Backup corruption detected" in str(exc_info.value)
 
 
+def test_archive_restore_rejects_manifest_relative_path_traversal(synthetic_archive, tmp_path: Path):
+    """A tampered manifest relative_path must not write outside the restore target."""
+    backup_root = tmp_path / "backups"
+
+    def mock_distinct_disks(p: Path) -> str:
+        res = p.resolve()
+        return "0:SRC" if (res == synthetic_archive.resolve() or synthetic_archive.resolve() in res.parents) else "1:TGT"
+
+    mgr = ArchiveBackupManager(archive_root=synthetic_archive, custom_disk_resolver=mock_distinct_disks)
+    manifest = mgr.create_backup(target_backup_root=backup_root)
+    backup_dir = Path(manifest.target_backup_dir)
+    manifest_file = backup_dir / "archive_backup_manifest.json"
+    manifest_data = json.loads(manifest_file.read_text(encoding="utf-8"))
+
+    escaped_payload = b'{"escaped": "archive-restore-traversal"}'
+    escaped_backup_file = backup_dir.parent / "escaped_archive.json"
+    escaped_backup_file.write_bytes(escaped_payload)
+
+    manifest_data["files"][0]["relative_path"] = "../escaped_archive.json"
+    manifest_data["files"][0]["sha256"] = hashlib.sha256(escaped_payload).hexdigest()
+    manifest_data["files"][0]["byte_size"] = len(escaped_payload)
+    manifest_file.write_text(json.dumps(manifest_data), encoding="utf-8")
+
+    restore_target = tmp_path / "restore_target"
+    escaped_restore_path = tmp_path / "escaped_archive.json"
+
+    with pytest.raises(ArchiveRestoreError) as exc_info:
+        mgr.validate_and_restore(
+            backup_dir=backup_dir,
+            target_restore_dir=restore_target,
+        )
+
+    assert "relative path" in str(exc_info.value).lower() or "traversal" in str(exc_info.value).lower()
+    assert not escaped_restore_path.exists()
+
+
 # ============================================================================
 # 5. Interrupted Archive Backup Recovery (.staging cleanup)
 # ============================================================================
@@ -303,13 +347,13 @@ def test_interrupted_archive_backup_recovery(synthetic_archive, tmp_path: Path):
 # 6. Authorization Bound to Exact Plan Hash
 # ============================================================================
 
-def test_authorization_bound_to_exact_plan_hash(synthetic_plan_and_inventory, tmp_path: Path):
+def test_authorization_bound_to_exact_plan_hash(synthetic_plan_and_inventory, tmp_path: Path, auth_key):
     """Verifies that authorization successfully validates when plan and inventory hashes match."""
     dest_dir = tmp_path / "dest_runtime"
     dest_dir.mkdir()
     ledger_path = tmp_path / "auth_ledger.jsonl"
     ledger = AuthorizationLedger(ledger_path)
-    gate = ProductionMigrationAuthorizationGate(ledger)
+    gate = ProductionMigrationAuthorizationGate(ledger, pinned_public_key=auth_key.public_key())
 
     now = datetime.now(timezone.utc)
     auth = ProductionMigrationAuthorization(
@@ -329,6 +373,7 @@ def test_authorization_bound_to_exact_plan_hash(synthetic_plan_and_inventory, tm
         operator_name="Operator Rangga",
         operator_confirmation=True,
     )
+    auth = sign_authorization_token(auth, auth_key, public_key_id="KEY-TEST")
 
     result = gate.verify_and_consume(
         authorization=auth,
@@ -347,12 +392,12 @@ def test_authorization_bound_to_exact_plan_hash(synthetic_plan_and_inventory, tm
 # 7. Authorization Invalidation After Plan Modification
 # ============================================================================
 
-def test_authorization_invalidated_on_plan_modification(synthetic_plan_and_inventory, tmp_path: Path):
+def test_authorization_invalidated_on_plan_modification(synthetic_plan_and_inventory, tmp_path: Path, auth_key):
     """Modifying even 1 byte in the migration plan fails closed with AuthorizationIntegrityError."""
     dest_dir = tmp_path / "dest_runtime"
     dest_dir.mkdir()
     ledger = AuthorizationLedger(tmp_path / "auth_ledger.jsonl")
-    gate = ProductionMigrationAuthorizationGate(ledger)
+    gate = ProductionMigrationAuthorizationGate(ledger, pinned_public_key=auth_key.public_key())
 
     now = datetime.now(timezone.utc)
     auth = ProductionMigrationAuthorization(
@@ -372,6 +417,7 @@ def test_authorization_invalidated_on_plan_modification(synthetic_plan_and_inven
         operator_name="Operator",
         operator_confirmation=True,
     )
+    auth = sign_authorization_token(auth, auth_key, public_key_id="KEY-TEST")
 
     # Mutate plan file
     plan_file = synthetic_plan_and_inventory["plan_file"]
@@ -393,12 +439,12 @@ def test_authorization_invalidated_on_plan_modification(synthetic_plan_and_inven
 # 8. Authorization Invalidation After Inventory Modification
 # ============================================================================
 
-def test_authorization_invalidated_on_inventory_modification(synthetic_plan_and_inventory, tmp_path: Path):
+def test_authorization_invalidated_on_inventory_modification(synthetic_plan_and_inventory, tmp_path: Path, auth_key):
     """Modifying inventory file fails closed with AuthorizationIntegrityError."""
     dest_dir = tmp_path / "dest_runtime"
     dest_dir.mkdir()
     ledger = AuthorizationLedger(tmp_path / "auth_ledger.jsonl")
-    gate = ProductionMigrationAuthorizationGate(ledger)
+    gate = ProductionMigrationAuthorizationGate(ledger, pinned_public_key=auth_key.public_key())
 
     now = datetime.now(timezone.utc)
     auth = ProductionMigrationAuthorization(
@@ -418,6 +464,7 @@ def test_authorization_invalidated_on_inventory_modification(synthetic_plan_and_
         operator_name="Operator",
         operator_confirmation=True,
     )
+    auth = sign_authorization_token(auth, auth_key, public_key_id="KEY-TEST")
 
     # Mutate inventory file
     inv_file = synthetic_plan_and_inventory["inv_file"]
@@ -439,7 +486,7 @@ def test_authorization_invalidated_on_inventory_modification(synthetic_plan_and_
 # 9. Destination Mismatch Rejection
 # ============================================================================
 
-def test_authorization_destination_mismatch_rejection(synthetic_plan_and_inventory, tmp_path: Path):
+def test_authorization_destination_mismatch_rejection(synthetic_plan_and_inventory, tmp_path: Path, auth_key):
     """Verifies that targeting a destination different from authorization fails closed."""
     dest_dir = tmp_path / "dest_runtime"
     dest_dir.mkdir()
@@ -447,7 +494,7 @@ def test_authorization_destination_mismatch_rejection(synthetic_plan_and_invento
     other_dest.mkdir()
 
     ledger = AuthorizationLedger(tmp_path / "auth_ledger.jsonl")
-    gate = ProductionMigrationAuthorizationGate(ledger)
+    gate = ProductionMigrationAuthorizationGate(ledger, pinned_public_key=auth_key.public_key())
 
     now = datetime.now(timezone.utc)
     auth = ProductionMigrationAuthorization(
@@ -467,6 +514,7 @@ def test_authorization_destination_mismatch_rejection(synthetic_plan_and_invento
         operator_name="Operator",
         operator_confirmation=True,
     )
+    auth = sign_authorization_token(auth, auth_key, public_key_id="KEY-TEST")
 
     with pytest.raises(AuthorizationDestinationError) as exc_info:
         gate.verify_and_consume(
@@ -483,12 +531,12 @@ def test_authorization_destination_mismatch_rejection(synthetic_plan_and_invento
 # 10. One-Time Authorization Nonce Consumption (Replay Fails Closed)
 # ============================================================================
 
-def test_authorization_one_time_nonce_replay_fails(synthetic_plan_and_inventory, tmp_path: Path):
+def test_authorization_one_time_nonce_replay_fails(synthetic_plan_and_inventory, tmp_path: Path, auth_key):
     """Verifies that replay of an already-consumed nonce is immediately rejected."""
     dest_dir = tmp_path / "dest_runtime"
     dest_dir.mkdir()
     ledger = AuthorizationLedger(tmp_path / "auth_ledger.jsonl")
-    gate = ProductionMigrationAuthorizationGate(ledger)
+    gate = ProductionMigrationAuthorizationGate(ledger, pinned_public_key=auth_key.public_key())
 
     now = datetime.now(timezone.utc)
     auth = ProductionMigrationAuthorization(
@@ -508,6 +556,7 @@ def test_authorization_one_time_nonce_replay_fails(synthetic_plan_and_inventory,
         operator_name="Operator",
         operator_confirmation=True,
     )
+    auth = sign_authorization_token(auth, auth_key, public_key_id="KEY-TEST")
 
     # First attempt: succeeds
     res = gate.verify_and_consume(
@@ -535,12 +584,12 @@ def test_authorization_one_time_nonce_replay_fails(synthetic_plan_and_inventory,
 # 11. Active Candidate Exclusion Guard (ASM-001/EVD-3965036b.json)
 # ============================================================================
 
-def test_authorization_active_candidate_exclusion_guard(synthetic_plan_and_inventory, tmp_path: Path):
+def test_authorization_active_candidate_exclusion_guard(synthetic_plan_and_inventory, tmp_path: Path, auth_key):
     """Verifies that omitting the active candidate from exclusion raises AuthorizationScopeError."""
     dest_dir = tmp_path / "dest_runtime"
     dest_dir.mkdir()
     ledger = AuthorizationLedger(tmp_path / "auth_ledger.jsonl")
-    gate = ProductionMigrationAuthorizationGate(ledger)
+    gate = ProductionMigrationAuthorizationGate(ledger, pinned_public_key=auth_key.public_key())
 
     now = datetime.now(timezone.utc)
     # Attempting to authorize with missing/wrong active candidate exclusion
@@ -561,6 +610,7 @@ def test_authorization_active_candidate_exclusion_guard(synthetic_plan_and_inven
         operator_name="Operator",
         operator_confirmation=True,
     )
+    auth = sign_authorization_token(auth, auth_key, public_key_id="KEY-TEST")
 
     with pytest.raises(AuthorizationScopeError) as exc_info:
         gate.verify_and_consume(
@@ -628,7 +678,7 @@ def test_no_clobber_backup_publication(synthetic_archive, tmp_path: Path):
 # 14. Maintenance Lock Enforcement on Backup and Gate Operations
 # ============================================================================
 
-def test_maintenance_lock_enforcement_on_engine_with_authorization(synthetic_plan_and_inventory, tmp_path: Path):
+def test_maintenance_lock_enforcement_on_engine_with_authorization(synthetic_plan_and_inventory, tmp_path: Path, auth_key):
     """Verifies that MigrationEngine rejects instantiation without MaintenanceSession or acquired InstanceLock."""
     dest_dir = tmp_path / "dest_runtime"
     dest_dir.mkdir()
@@ -652,12 +702,14 @@ def test_maintenance_lock_enforcement_on_engine_with_authorization(synthetic_pla
         operator_name="Operator",
         operator_confirmation=True,
     )
+    auth = sign_authorization_token(auth, auth_key, public_key_id="KEY-TEST")
 
     # Calling MigrationEngine without maintenance lock must raise ProcessLockError
     with pytest.raises(ProcessLockError) as exc_info:
         MigrationEngine(
             data_dir=dest_dir,
             authorization=auth,
+            authorization_public_key=auth_key.public_key(),
             inventory_file=synthetic_plan_and_inventory["inv_file"],
             plan_file=synthetic_plan_and_inventory["plan_file"],
             source_evidence_dir=synthetic_plan_and_inventory["src_dir"],
@@ -673,6 +725,7 @@ def test_maintenance_lock_enforcement_on_engine_with_authorization(synthetic_pla
             data_dir=dest_dir,
             maintenance_session=session,
             authorization=auth,
+            authorization_public_key=auth_key.public_key(),
             inventory_file=synthetic_plan_and_inventory["inv_file"],
             plan_file=synthetic_plan_and_inventory["plan_file"],
             source_evidence_dir=synthetic_plan_and_inventory["src_dir"],

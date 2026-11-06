@@ -79,6 +79,57 @@ def resolve_data_dir(env_override: Optional[str] = None) -> Path:
         ) from e
 
 
+def get_default_data_dir(platform: Optional[str] = None) -> Path:
+    """
+    Return the canonical default data directory without creating it.
+
+    The platform defaults match resolve_data_dir():
+    - Windows: %LOCALAPPDATA%\\AllTools-CyberSec
+    - POSIX: ${XDG_DATA_HOME:-~/.local/share}/AllTools-CyberSec
+    """
+    effective_platform = platform or os.name
+
+    if effective_platform == "nt":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        base_dir = (
+            Path(local_app_data)
+            if local_app_data
+            else Path.home() / "AppData" / "Local"
+        )
+        return (base_dir / "AllTools-CyberSec").resolve()
+
+    xdg_data = os.environ.get("XDG_DATA_HOME")
+    base_dir = Path(xdg_data) if xdg_data else Path.home() / ".local" / "share"
+    return (base_dir / "AllTools-CyberSec").resolve()
+
+
+def get_canonical_data_dir(
+    env_override: Optional[str] = None,
+    platform: Optional[str] = None,
+) -> Path:
+    """
+    Resolve the configured production data directory without creating it.
+
+    ALLTOOLS_DATA_DIR (or env_override) takes precedence on every platform,
+    matching resolve_data_dir() semantics.
+    """
+    custom_dir = env_override if env_override is not None else os.environ.get("ALLTOOLS_DATA_DIR")
+    if custom_dir:
+        return Path(custom_dir).expanduser().resolve()
+    return get_default_data_dir(platform=platform)
+
+
+def is_production_data_dir(
+    target: Path,
+    env_override: Optional[str] = None,
+    platform: Optional[str] = None,
+) -> bool:
+    """Return True if target is the canonical data directory or one of its descendants."""
+    resolved_target = Path(target).expanduser().resolve()
+    production_dir = get_canonical_data_dir(env_override=env_override, platform=platform)
+    return resolved_target == production_dir or production_dir in resolved_target.parents
+
+
 def get_storage_paths(custom_data_dir: Optional[Path] = None) -> StoragePaths:
     """Get the structured storage path configuration."""
     data_dir = custom_data_dir if custom_data_dir is not None else resolve_data_dir()

@@ -210,7 +210,7 @@ def test_in_progress_state_replay_for_pending_and_running(idempotency_sandbox, m
 
     # 1. Direct reservation in PENDING state with matching fingerprint
     from app.api.executions import compute_request_fingerprint
-    actual_fp = compute_request_fingerprint("ASM-IDEMP-03", "SEC-WEB-001", "example.com", "ENG-IDEMP-03", "AST-001", None)
+    actual_fp = compute_request_fingerprint("ASM-IDEMP-03", "SEC-WEB-001", "example.com", "ENG-IDEMP-03", "AST-001", None, operation="run")
 
     pending = CheckExecution(
         id="CHK-INPROGRESS-01",
@@ -270,7 +270,7 @@ def test_interrupted_state_never_triggers_automatic_retry(idempotency_sandbox, m
     monkeypatch.setattr(SecWeb001Rule, "evaluate", fail_if_invoked)
 
     from app.api.executions import compute_request_fingerprint
-    actual_fp = compute_request_fingerprint("ASM-IDEMP-04", "SEC-WEB-001", "example.com", "ENG-IDEMP-04", "AST-001", None)
+    actual_fp = compute_request_fingerprint("ASM-IDEMP-04", "SEC-WEB-001", "example.com", "ENG-IDEMP-04", "AST-001", None, operation="run")
 
     interrupted = CheckExecution(
         id="CHK-INTERRUPTED-01",
