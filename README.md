@@ -42,7 +42,7 @@ AllTools-CyberSec dibuat untuk:
 | --- | --- |
 | Backend | Python 3.10+, FastAPI, Pydantic v2 |
 | HTTP & testing | HTTPX, Pytest |
-| Frontend | TypeScript, React 18, Vite 5 |
+| Frontend | TypeScript, React 18, Vite 8 |
 | UI | Lucide React, CSS variables/design tokens |
 | Kontrak data | JSON Schema (Draft 2020-12) |
 
@@ -68,7 +68,7 @@ AllTools-Syber_Security/
 
 ## 6. Cara Menjalankan
 
-**Prasyarat:** Python 3.10+ dan Node.js 18+.
+**Prasyarat:** Python 3.10+ dan Node.js 20.19+ (Vite 8).
 
 ### Backend
 
@@ -140,16 +140,16 @@ npm run build
 
 `pytest.ini` sudah menetapkan `pythonpath = . backend` dan `testpaths = backend/tests tests`, jadi perintah dijalankan dari root repo. Pengujian mencakup Scope Guard, API, serta rule dan analyzer dengan fixture. Tidak ada test yang memindai target jaringan live.
 
-Status verifikasi terakhir (7 November 2026): **283 backend test passed**, dengan 1 `StarletteDeprecationWarning` dari `httpx`/`starlette.testclient`. Frontend diverifikasi melalui `npm run build`; belum ada automated test frontend.
+Status verifikasi terakhir (7 November 2026): **285 backend test passed**, dengan 1 `StarletteDeprecationWarning` dari `httpx`/`starlette.testclient`. Frontend diverifikasi melalui `npm run build` dan smoke test dev server Vite 8; belum ada automated test frontend.
 
 ## 8. Status Proyek & Batasan yang Diketahui
 
 **Status verifikasi terakhir (7 November 2026):**
 
-- **283 backend test passed** (1 deprecation warning dari Starlette TestClient).
-- Frontend TypeScript + Vite build lulus.
+- **285 backend test passed** (1 deprecation warning dari Starlette TestClient).
+- Frontend TypeScript + Vite 8 build lulus; `npm audit` melaporkan 0 vulnerability.
 - Data operasional tersimpan di SQLite dan bertahan setelah restart backend.
-- Hardening keamanan dari review PR: fingerprint eksekusi terikat pada operasi (`pre-flight` vs `run`), record pre-flight memakai namespace `PRE-`, deteksi direktori data produksi lintas platform, verifikasi authorization Ed25519 dengan public key yang di-pin, serta validasi containment pada restore backup, archive path, dan recovery quarantine.
+- Hardening keamanan dari review PR: fingerprint eksekusi terikat pada operasi (`pre-flight` vs `run`), record pre-flight memakai namespace `PRE-`, deteksi direktori data produksi lintas platform (termasuk direktori default saat override aktif), verifikasi authorization Ed25519 dengan public key yang di-pin, serta validasi containment pada restore backup, archive path, dan recovery quarantine.
 
 **Batasan saat ini:**
 
