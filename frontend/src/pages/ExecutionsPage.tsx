@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   PlayCircle,
   ShieldCheck,
@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   RefreshCw,
   Terminal,
+  Info,
 } from 'lucide-react';
 import {
   api,
@@ -21,136 +22,178 @@ import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { StatePanel } from '@/components/StatePanel';
 import { DemoBadge } from '@/components/DemoBadge';
 import { KeyValue } from '@/components/KeyValue';
+import { FilterTabs } from '@/components/FilterTabs';
+import { PageHeader } from '@/components/PageHeader';
+import { ContextSidebar } from '@/components/ContextSidebar';
+import { BackendConnectionState } from '@/components/ConnectionStatus';
 
 interface ExecutionsPageProps {
   isDemoMode: boolean;
+  assessmentId: string | null;
+  connectionState: BackendConnectionState;
+  contextLoading?: boolean;
+  contextError?: string | null;
+  onRetryContext?: () => void;
+  refreshToken?: number;
+  onExecutionsChanged?: () => void;
 }
 
-export const ExecutionsPage: React.FC<ExecutionsPageProps> = ({ isDemoMode }) => {
+const OFFLINE_ANALYSIS_RULES = new Set(['SEC-AUTH-001', 'SEC-CRYPTO-001']);
+
+export const ExecutionsPage: React.FC<ExecutionsPageProps> = ({
+  isDemoMode,
+  assessmentId,
+  connectionState,
+  contextLoading = false,
+  contextError = null,
+  onRetryContext,
+  refreshToken = 0,
+  onExecutionsChanged,
+}) => {
   const [rules, setRules] = useState<SecurityRuleMetadata[]>([]);
   const [executions, setExecutions] = useState<CheckExecutionRecord[]>([]);
-  const [selectedExec, setSelectedExec] = useState<CheckExecutionRecord | null>(null);
+  const [selectedExec, setSelectedExec] = useState<CheckExecutionRecord | null>(
+    null,
+  );
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string>('all');
 
-  // Execution Form State
-  const [ruleId, setRuleId] = useState<string>('SEC-WEB-001');
-  const [target, setTarget] = useState<string>('app.lab.local');
+  // Execution form
+  const [ruleId, setRuleId] = useState<string>('');
+  const [target, setTarget] = useState<string>('');
   const [running, setRunning] = useState<boolean>(false);
   const [lastResult, setLastResult] = useState<RunCheckResponse | null>(null);
+  const [resultAt, setResultAt] = useState<Date | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState<boolean>(false);
 
-  const assessmentId = isDemoMode ? 'DEMO-ASM-001' : 'ASM-001';
+  const isOffline =
+    connectionState === 'offline' || connectionState === 'api_error';
+  const runDisabledReason = isDemoMode
+    ? 'Check execution is disabled in Demo Mode. No request is sent to any target.'
+    : isOffline
+      ? 'Check execution is disabled while the backend is offline or has an API error.'
+      : !assessmentId
+        ? 'Select an assessment before running a check.'
+        : '';
 
-  const loadData = async () => {
-    setLoading(true);
-    setError(null);
-    setLastResult(null);
-    setRunError(null);
-    setSelectedExec(null);
+  const fetchExecutions = useCallback(
+    async (showLoading = true) => {
+      if (showLoading) setLoading(true);
+      setError(null);
 
-    if (isDemoMode) {
-      setRules(DEMO_RULES);
-      setExecutions(DEMO_CHECK_EXECUTIONS);
-      setSelectedExec(DEMO_CHECK_EXECUTIONS[0] || null);
-      setLoading(false);
-      return;
-    }
+      if (isDemoMode) {
+        setRules(DEMO_RULES);
+        setExecutions(DEMO_CHECK_EXECUTIONS);
+        setSelectedExec(DEMO_CHECK_EXECUTIONS[0] || null);
+        setLoading(false);
+        return;
+      }
 
-    try {
-      const [rulesRes, execsRes] = await Promise.all([
-        api.getRules().catch(() => []),
-        api.getExecutions().catch(() => []),
-      ]);
-
-      setRules(rulesRes);
-      setExecutions(execsRes);
-      setSelectedExec(execsRes.length > 0 ? execsRes[0] : null);
-    } catch (err: any) {
-      setError(err?.message || 'Failed to load check execution telemetry from backend');
-    } finally {
-      setLoading(false);
-    }
-  };
+      try {
+        const [ruleList, executionList] = await Promise.all([
+          api.getRules(),
+          assessmentId ? api.getExecutions(assessmentId) : Promise.resolve([]),
+        ]);
+        setRules(ruleList);
+        setExecutions(executionList);
+        setSelectedExec(executionList[0] || null);
+      } catch (err: any) {
+        setRules([]);
+        setExecutions([]);
+        setSelectedExec(null);
+        setError(
+          err?.message || 'Failed to load execution data from the backend.',
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [assessmentId, isDemoMode],
+  );
 
   useEffect(() => {
-    loadData();
-  }, [isDemoMode]);
+    setLastResult(null);
+    setResultAt(null);
+    setRunError(null);
+    setTarget('');
+    fetchExecutions();
+  }, [fetchExecutions, refreshToken]);
 
-  const selectedRuleMeta = rules.find((r) => r.ruleId === ruleId);
+  useEffect(() => {
+    if (rules.length === 0) {
+      setRuleId('');
+      return;
+    }
+    setRuleId((current) =>
+      rules.some((rule) => rule.ruleId === current)
+        ? current
+        : rules[0].ruleId,
+    );
+  }, [rules]);
+
+  const selectedRuleMeta = rules.find((rule) => rule.ruleId === ruleId);
+
+  const groupedRules = useMemo(() => {
+    const grouped: Record<string, SecurityRuleMetadata[]> = {};
+    for (const rule of rules) {
+      if (!grouped[rule.category]) grouped[rule.category] = [];
+      grouped[rule.category].push(rule);
+    }
+    return grouped;
+  }, [rules]);
+
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const execution of executions) {
+      counts[execution.status] = (counts[execution.status] || 0) + 1;
+    }
+    return counts;
+  }, [executions]);
+
+  const filteredExecutions =
+    statusFilter === 'all'
+      ? executions
+      : executions.filter((execution) => execution.status === statusFilter);
 
   const getTargetPlaceholder = () => {
-    if (ruleId === 'SEC-CRYPTO-001') return 'e.g. 5d41402abc4b2a76b9719d911017c592 or SHA256 string';
-    if (ruleId === 'SEC-AUTH-001') return 'e.g. AdminPassword!2026';
+    if (ruleId === 'SEC-CRYPTO-001') {
+      return 'e.g. 5d41402abc4b2a76b9719d911017c592 or a SHA-256 string';
+    }
+    if (ruleId === 'SEC-AUTH-001') return 'e.g. a password sample to analyze locally';
     if (ruleId === 'SEC-NET-001') return 'e.g. 192.168.1.50 or app.lab.local';
     return 'e.g. app.lab.local, lab.local, 192.168.1.100';
   };
 
-  const handleOpenConfirm = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!target.trim()) return;
+  const handleOpenConfirm = (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!target.trim() || runDisabledReason || !assessmentId) return;
     setShowConfirmModal(true);
   };
 
   const handleExecuteCheck = async () => {
     setShowConfirmModal(false);
-    if (!target.trim()) return;
+    if (!target.trim() || !assessmentId || isDemoMode || isOffline) return;
 
     setRunning(true);
     setRunError(null);
     setLastResult(null);
-
-    if (isDemoMode) {
-      // Offline deterministic simulation for demo fixtures
-      const cleanTarget = target.trim().toLowerCase();
-      const isAllowed =
-        ruleId === 'SEC-AUTH-001' ||
-        ruleId === 'SEC-CRYPTO-001' ||
-        (cleanTarget.includes('lab.local') && !cleanTarget.includes('database'));
-
-      const demoRecord: RunCheckResponse = {
-        allowed: isAllowed,
-        executionRecord: {
-          id: `DEMO-CHK-${Math.floor(1000 + Math.random() * 9000)}`,
-          assessmentId,
-          ruleId,
-          target: target.trim(),
-          scopeDecision: isAllowed ? 'ALLOW' : 'BLOCK',
-          status: isAllowed ? 'PASS' : 'BLOCKED_OUT_OF_SCOPE',
-          durationMs: isAllowed ? 38 : 2,
-          errorCode: isAllowed ? undefined : 'SCOPE_VIOLATION',
-          errorMessage: isAllowed
-            ? undefined
-            : 'Target excluded by scope policy rule DEMO-SCP-003.',
-          executedAt: new Date().toISOString(),
-        },
-        observation: isAllowed
-          ? {
-              id: 'DEMO-OBS-01',
-              summary: `Target ${target} passed defensive parameter validation for ${ruleId}.`,
-              observedAt: new Date().toISOString(),
-            }
-          : undefined,
-        message: isAllowed
-          ? `Check ${ruleId} completed with status PASS.`
-          : 'BLOCKED — OUT OF SCOPE. Target is not authorized under active scope policy.',
-      };
-
-      setLastResult(demoRecord);
-      setExecutions([demoRecord.executionRecord, ...executions]);
-      setSelectedExec(demoRecord.executionRecord);
-      setRunning(false);
-      return;
-    }
+    setResultAt(null);
 
     try {
-      const res = await api.runCheck(assessmentId, ruleId, target.trim());
-      setLastResult(res);
-      setExecutions([res.executionRecord, ...executions]);
-      setSelectedExec(res.executionRecord);
+      const response = await api.runCheck(assessmentId, ruleId, target.trim());
+      setLastResult(response);
+      setResultAt(new Date());
+      // Refetch the audit trail instead of prepending a local record.
+      await fetchExecutions(false);
+      onExecutionsChanged?.();
     } catch (err: any) {
-      setRunError(err?.message || 'Check execution request failed on backend API');
+      setLastResult(null);
+      setRunError(
+        err?.message ||
+          'The execution request failed. No result was produced by the backend.',
+      );
     } finally {
       setRunning(false);
     }
@@ -159,10 +202,10 @@ export const ExecutionsPage: React.FC<ExecutionsPageProps> = ({ isDemoMode }) =>
   const columns: DataTableColumn<CheckExecutionRecord>[] = [
     {
       key: 'executedAt',
-      label: 'Executed At',
-      width: '120px',
+      label: 'Executed',
+      width: '78px',
       render: (row) => (
-        <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
+        <span className="wb-mono-muted">
           {new Date(row.executedAt).toLocaleTimeString()}
         </span>
       ),
@@ -170,36 +213,36 @@ export const ExecutionsPage: React.FC<ExecutionsPageProps> = ({ isDemoMode }) =>
     {
       key: 'id',
       label: 'Execution ID',
-      width: '120px',
+      width: '112px',
       render: (row) => (
-        <code style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
-          {row.id}
-        </code>
+        <code style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{row.id}</code>
       ),
     },
     {
       key: 'ruleId',
-      label: 'Rule Module',
-      width: '110px',
+      label: 'Rule',
+      width: '96px',
       render: (row) => (
-        <code style={{ color: 'var(--accent)', fontWeight: 600 }}>
-          {row.ruleId}
-        </code>
+        <code style={{ color: 'var(--accent)', fontWeight: 600 }}>{row.ruleId}</code>
       ),
     },
     {
       key: 'target',
       label: 'Target',
       render: (row) => (
-        <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>
+        <span
+          className="wb-cell-truncate"
+          title={row.target}
+          style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}
+        >
           {row.target}
         </span>
       ),
     },
     {
       key: 'scopeDecision',
-      label: 'Scope Guard',
-      width: '100px',
+      label: 'Scope',
+      width: '78px',
       render: (row) => (
         <span
           className="wb-chip"
@@ -226,433 +269,455 @@ export const ExecutionsPage: React.FC<ExecutionsPageProps> = ({ isDemoMode }) =>
     {
       key: 'status',
       label: 'Status',
-      width: '110px',
+      width: '112px',
       render: (row) => <StatusBadge status={row.status} size="sm" />,
-    },
-    {
-      key: 'durationMs',
-      label: 'Duration',
-      width: '90px',
-      render: (row) => (
-        <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
-          {row.durationMs !== undefined ? `${row.durationMs}ms` : '—'}
-        </span>
-      ),
     },
   ];
 
-  // Group rules by category for select dropdown
-  const groupedRules: Record<string, SecurityRuleMetadata[]> = {};
-  for (const r of rules) {
-    if (!groupedRules[r.category]) {
-      groupedRules[r.category] = [];
-    }
-    groupedRules[r.category].push(r);
+  if (contextLoading && !isDemoMode) {
+    return <StatePanel kind="loading" title="Loading workspace context…" />;
   }
 
-  if (loading && !isDemoMode) {
-    return <StatePanel kind="loading" title="Loading Execution Telemetry..." />;
-  }
-
-  if (error && !isDemoMode) {
+  if (contextError && !isDemoMode) {
     return (
       <StatePanel
-        kind="offline"
-        title="Check Execution Service Offline"
-        description="Could not query available security rules or past execution records from backend."
+        kind={isOffline ? 'offline' : 'error'}
+        title="Workspace context unavailable"
+        description="The engagement and assessment lists could not be loaded, so no execution data can be shown."
+        errorMessage={contextError}
+        onRetry={onRetryContext}
+      />
+    );
+  }
+
+  if (loading) {
+    return <StatePanel kind="loading" title="Loading execution data…" />;
+  }
+
+  if (error) {
+    return (
+      <StatePanel
+        kind={isOffline ? 'offline' : 'error'}
+        title={isOffline ? 'Execution backend unreachable' : 'Execution request failed'}
+        description="No execution data is shown because the backend request did not succeed."
         errorMessage={error}
-        onRetry={loadData}
+        onRetry={() => fetchExecutions()}
       />
     );
   }
 
   return (
-    <div className="wb-split-v">
-      {/* =========================================================================
-          Top Pane: Execution Launcher Form & Real-Time Output Banner
-          ========================================================================= */}
-      <div className="wb-panel" style={{ overflow: 'visible' }}>
-        <div className="wb-panel-header">
-          <div className="wb-panel-title">
-            <PlayCircle size={14} color="var(--accent)" />
-            <span>Defensive Security Check Execution Pipeline</span>
-            {isDemoMode && <DemoBadge />}
-          </div>
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-            Scope Guard: <strong>Enforcing Default-Deny</strong>
+    <div className="wb-page-layout">
+      <ContextSidebar
+        title="Check Executions"
+        footer={
+          <span>
+            {isDemoMode
+              ? 'Fixture execution records for visual exploration only.'
+              : 'Execution records are read from the backend audit trail for the selected assessment.'}
           </span>
+        }
+      >
+        <div className="wb-context-section">
+          <div className="wb-section-label">Assessment context</div>
+          <KeyValue
+            items={[
+              { key: 'Assessment', value: assessmentId || 'No assessment' },
+              { key: 'Rules available', value: rules.length },
+              { key: 'Executions', value: executions.length },
+              {
+                key: 'Source',
+                value: isDemoMode ? 'DEMO fixture' : 'Backend API',
+              },
+            ]}
+          />
         </div>
 
-        <div className="wb-panel-body" style={{ padding: '16px' }}>
-          <form
-            onSubmit={handleOpenConfirm}
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1.2fr 2fr auto',
-              gap: '10px',
-              alignItems: 'flex-end',
-            }}
-          >
-            <div>
-              <label
-                style={{
-                  display: 'block',
-                  fontSize: '11px',
-                  color: 'var(--text-muted)',
-                  marginBottom: '4px',
-                  fontWeight: 600,
-                }}
-              >
-                Security Rule Module ({rules.length} Available)
-              </label>
-              <select
-                className="wb-select"
-                value={ruleId}
-                onChange={(e) => setRuleId(e.target.value)}
-                style={{ width: '100%', fontFamily: 'var(--font-mono)' }}
-              >
-                {Object.entries(groupedRules).map(([cat, catRules]) => (
-                  <optgroup key={cat} label={cat}>
-                    {catRules.map((r) => (
-                      <option key={r.ruleId} value={r.ruleId}>
-                        {r.ruleId}: {r.title}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label
-                style={{
-                  display: 'block',
-                  fontSize: '11px',
-                  color: 'var(--text-muted)',
-                  marginBottom: '4px',
-                  fontWeight: 600,
-                }}
-              >
-                Target Identifier / Test Sample
-              </label>
-              <input
-                type="text"
-                required
-                className="wb-input font-mono"
-                placeholder={getTargetPlaceholder()}
-                value={target}
-                onChange={(e) => setTarget(e.target.value)}
-                style={{ width: '100%' }}
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={running || !target.trim()}
-              className="wb-btn wb-btn-primary"
-              style={{ padding: '6px 14px' }}
-            >
-              {running ? (
-                <>
-                  <RefreshCw size={13} className="spin" />
-                  Running...
-                </>
-              ) : (
-                <>
-                  <PlayCircle size={14} />
-                  Execute Check
-                </>
-              )}
-            </button>
-          </form>
-
-          {/* Selected Rule Documentation Hint */}
-          {selectedRuleMeta && (
-            <div
-              style={{
-                marginTop: '10px',
-                padding: '8px 12px',
-                borderRadius: '3px',
-                background: 'var(--bg-table-zebra)',
-                border: '1px solid var(--border-subtle)',
-                fontSize: '11px',
-                color: 'var(--text-secondary)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px',
-              }}
-            >
-              <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                {selectedRuleMeta.title}
-              </span>
-              <span>Classification: <code style={{ color: 'var(--accent)' }}>{selectedRuleMeta.cwe}</code></span>
-              <span style={{ color: 'var(--text-muted)' }}>{selectedRuleMeta.description}</span>
-            </div>
-          )}
-
-          {/* Execution Error Banner */}
-          {runError && (
-            <div
-              style={{
-                marginTop: '12px',
-                padding: '10px 14px',
-                borderRadius: '4px',
-                background: 'var(--status-error-bg)',
-                border: '1px solid var(--status-error-border)',
-                color: 'var(--status-error-text)',
-                fontSize: '11px',
-              }}
-            >
-              <strong>Check Execution Error:</strong> {runError}
-            </div>
-          )}
-
-          {/* Last Result Live Output Banner */}
-          {lastResult && (
-            <div
-              style={{
-                marginTop: '12px',
-                padding: '12px 14px',
-                borderRadius: '4px',
-                backgroundColor: lastResult.allowed
-                  ? lastResult.executionRecord.status === 'FAIL'
-                    ? 'var(--status-fail-bg)'
-                    : 'var(--status-pass-bg)'
-                  : 'var(--status-blocked-bg)',
-                border: `1px solid ${
-                  lastResult.allowed
-                    ? lastResult.executionRecord.status === 'FAIL'
-                      ? 'var(--status-fail-border)'
-                      : 'var(--status-pass-border)'
-                    : 'var(--status-blocked-border)'
-                }`,
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  {lastResult.allowed ? (
-                    lastResult.executionRecord.status === 'FAIL' ? (
-                      <AlertTriangle size={16} color="var(--status-fail-text)" />
-                    ) : (
-                      <ShieldCheck size={16} color="var(--status-pass-text)" />
-                    )
-                  ) : (
-                    <ShieldAlert size={16} color="var(--status-blocked-text)" />
-                  )}
-                  <span
-                    style={{
-                      fontWeight: 700,
-                      fontFamily: 'var(--font-mono)',
-                      fontSize: '12px',
-                      color: lastResult.allowed
-                        ? lastResult.executionRecord.status === 'FAIL'
-                          ? 'var(--status-fail-text)'
-                          : 'var(--status-pass-text)'
-                        : 'var(--status-blocked-text)',
-                    }}
-                  >
-                    {lastResult.allowed
-                      ? `CHECK RESULT: ${lastResult.executionRecord.status}`
-                      : 'SCOPE VIOLATION — BLOCKED'}
-                  </span>
+        <div className="wb-context-section">
+          <div className="wb-section-label">Rule categories</div>
+          {Object.keys(groupedRules).length === 0 ? (
+            <p className="wb-context-note">No rules returned by the backend.</p>
+          ) : (
+            <div className="wb-category-list">
+              {Object.entries(groupedRules).map(([category, categoryRules]) => (
+                <div key={category} className="wb-category-row">
+                  <span>{category}</span>
+                  <strong>{categoryRules.length}</strong>
                 </div>
-                <StatusBadge status={lastResult.executionRecord.status} size="sm" />
-              </div>
-
-              <div
-                style={{
-                  fontSize: '11px',
-                  fontFamily: 'var(--font-mono)',
-                  color: 'var(--text-primary)',
-                  whiteSpace: 'pre-wrap',
-                }}
-              >
-                {lastResult.message}
-              </div>
-
-              {lastResult.finding && (
-                <div
-                  style={{
-                    marginTop: '8px',
-                    padding: '8px 10px',
-                    background: 'var(--bg-surface)',
-                    border: '1px solid var(--border-default)',
-                    borderRadius: '3px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                  }}
-                >
-                  <SeverityBadge severity={lastResult.finding.severity} size="sm" />
-                  <span style={{ fontWeight: 600, fontSize: '11px', color: 'var(--text-primary)' }}>
-                    {lastResult.finding.title}
-                  </span>
-                  {lastResult.finding.cwe && (
-                    <code style={{ fontSize: '10px', color: 'var(--accent)' }}>
-                      {lastResult.finding.cwe}
-                    </code>
-                  )}
-                </div>
-              )}
+              ))}
             </div>
           )}
         </div>
-      </div>
 
-      {/* =========================================================================
-          Bottom Pane: Split Table of Past Executions & Inspector
-          ========================================================================= */}
-      <div className="wb-split-h">
-        {/* Executions Table */}
-        <div className="wb-panel">
-          <div className="wb-panel-header">
-            <div className="wb-panel-title">
-              <Terminal size={14} color="var(--text-secondary)" />
-              <span>Execution Audit Log</span>
-              <span className="wb-panel-count">{executions.length}</span>
-            </div>
-            <button
-              onClick={loadData}
-              className="wb-btn wb-btn-sm"
-              title="Refresh executions from backend"
-            >
-              <RefreshCw size={10} />
-              Refresh
-            </button>
-          </div>
-
-          <div className="wb-panel-body">
-            <DataTable
-              columns={columns}
-              data={executions}
-              keyExtractor={(row) => row.id}
-              selectedId={selectedExec?.id}
-              onSelectRow={(row) => setSelectedExec(row)}
-              emptyMessage="No execution records recorded. Run a check above."
+        <div className="wb-context-section">
+          <div className="wb-section-label">Execution status</div>
+          <div className="wb-sidebar-filters">
+            <FilterTabs
+              options={[
+                { id: 'all', label: 'All', count: executions.length },
+                ...Object.entries(statusCounts).map(([status, count]) => ({
+                  id: status,
+                  label: status,
+                  count,
+                })),
+              ]}
+              activeId={statusFilter}
+              onChange={setStatusFilter}
             />
           </div>
         </div>
+      </ContextSidebar>
 
-        {/* Selected Execution Inspector */}
-        <div className="wb-panel">
-          <div className="wb-panel-header">
-            <div className="wb-panel-title">
-              <span>Execution Details: {selectedExec?.id || 'None'}</span>
+      <div className="wb-page-main">
+        <PageHeader
+          title="Check Executions"
+          description={
+            isDemoMode
+              ? 'Demo fixture records. The launcher is disabled; nothing is sent to a target.'
+              : 'Run defensive checks with confirmation. The backend re-validates every target against Scope Guard.'
+          }
+          isDemoMode={isDemoMode}
+          meta={
+            <>
+              <span>
+                Assessment: <strong>{assessmentId || 'No assessment'}</strong>
+              </span>
+              <span>
+                Rules: <strong>{rules.length}</strong>
+              </span>
+              <span>Mode: {isDemoMode ? 'DEMO fixture' : 'LIVE backend'}</span>
+            </>
+          }
+        />
+
+        <div className="wb-page-body wb-executions-workspace">
+          <div className="wb-panel">
+            <div className="wb-panel-header">
+              <div className="wb-panel-title">
+                <PlayCircle size={14} color="var(--accent)" />
+                <span>Execution launcher</span>
+                {isDemoMode && <DemoBadge />}
+              </div>
+              <span className="wb-toolbar-hint">
+                Scope Guard → Collector → Normalizer → Rule → Observation →
+                Finding → Evidence
+              </span>
+            </div>
+
+            <div className="wb-panel-body wb-launcher-body">
+              {isDemoMode && (
+                <div className="wb-inline-note">
+                  <Info size={12} />
+                  Demo Mode: the launcher is disabled. Fixture records are shown
+                  for visual exploration only; nothing is sent to a target.
+                </div>
+              )}
+
+              <form className="wb-launcher-form" onSubmit={handleOpenConfirm}>
+                <div>
+                  <label className="wb-form-label" htmlFor="execution-rule">
+                    Security rule module ({rules.length} available)
+                  </label>
+                  <select
+                    id="execution-rule"
+                    className="wb-select"
+                    value={ruleId}
+                    onChange={(event) => setRuleId(event.target.value)}
+                    disabled={isDemoMode || rules.length === 0}
+                    style={{ fontFamily: 'var(--font-mono)', width: '100%' }}
+                  >
+                    {Object.entries(groupedRules).map(([category, categoryRules]) => (
+                      <optgroup key={category} label={category}>
+                        {categoryRules.map((rule) => (
+                          <option key={rule.ruleId} value={rule.ruleId}>
+                            {rule.ruleId}: {rule.title}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="wb-form-label" htmlFor="execution-target">
+                    Target identifier / test sample
+                  </label>
+                  <input
+                    id="execution-target"
+                    type="text"
+                    required
+                    className="wb-input font-mono"
+                    placeholder={getTargetPlaceholder()}
+                    value={target}
+                    onChange={(event) => setTarget(event.target.value)}
+                    disabled={isDemoMode || !assessmentId}
+                  />
+                  {OFFLINE_ANALYSIS_RULES.has(ruleId) && (
+                    <div className="wb-field-hint">
+                      Local input analysis — no external network transmission.
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={
+                    isDemoMode ||
+                    isOffline ||
+                    !assessmentId ||
+                    running ||
+                    !target.trim()
+                  }
+                  className="wb-btn wb-btn-primary"
+                  title={runDisabledReason || 'Review and run this check'}
+                >
+                  {running ? (
+                    <>
+                      <RefreshCw size={13} className="spin" /> Running…
+                    </>
+                  ) : (
+                    <>
+                      <PlayCircle size={14} /> Review &amp; Run
+                    </>
+                  )}
+                </button>
+              </form>
+
+              {runDisabledReason && (
+                <div className="wb-inline-note muted">{runDisabledReason}</div>
+              )}
+
+              {selectedRuleMeta && !isDemoMode && (
+                <div className="wb-rule-hint">
+                  <strong>{selectedRuleMeta.title}</strong>
+                  <span>
+                    Classification:{' '}
+                    <code style={{ color: 'var(--accent)' }}>
+                      {selectedRuleMeta.cwe}
+                    </code>
+                  </span>
+                  <span>{selectedRuleMeta.description}</span>
+                </div>
+              )}
+
+              {runError && (
+                <div className="wb-alert error" role="alert">
+                  <strong>Execution error — no result was produced.</strong>{' '}
+                  {runError}
+                </div>
+              )}
+
+              {lastResult && (
+                <div
+                  className="wb-result-banner"
+                  style={{
+                    backgroundColor: lastResult.allowed
+                      ? lastResult.executionRecord.status === 'FAIL'
+                        ? 'var(--status-fail-bg)'
+                        : 'var(--status-pass-bg)'
+                      : 'var(--status-blocked-bg)',
+                    border: `1px solid ${
+                      lastResult.allowed
+                        ? lastResult.executionRecord.status === 'FAIL'
+                          ? 'var(--status-fail-border)'
+                          : 'var(--status-pass-border)'
+                        : 'var(--status-blocked-border)'
+                    }`,
+                  }}
+                  role="status"
+                >
+                  <div className="wb-result-head">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      {lastResult.allowed ? (
+                        lastResult.executionRecord.status === 'FAIL' ? (
+                          <AlertTriangle size={16} color="var(--status-fail-text)" />
+                        ) : (
+                          <ShieldCheck size={16} color="var(--status-pass-text)" />
+                        )
+                      ) : (
+                        <ShieldAlert size={16} color="var(--status-blocked-text)" />
+                      )}
+                      <span className="wb-result-title">
+                        {lastResult.allowed
+                          ? `Backend result: ${lastResult.executionRecord.status}`
+                          : 'Scope violation — blocked by backend'}
+                      </span>
+                    </div>
+                    <StatusBadge status={lastResult.executionRecord.status} size="sm" />
+                  </div>
+
+                  <div className="wb-result-message">{lastResult.message}</div>
+
+                  <KeyValue
+                    items={[
+                      { key: 'Execution ID', value: lastResult.executionRecord.id },
+                      {
+                        key: 'Scope decision',
+                        value: lastResult.executionRecord.scopeDecision,
+                      },
+                      {
+                        key: 'Duration',
+                        value:
+                          lastResult.executionRecord.durationMs !== undefined
+                            ? `${lastResult.executionRecord.durationMs} ms`
+                            : '—',
+                      },
+                      {
+                        key: 'Received at',
+                        value: resultAt ? resultAt.toLocaleString() : '—',
+                      },
+                    ]}
+                  />
+
+                  {lastResult.observation && (
+                    <div className="wb-result-extra">
+                      <div className="wb-section-label">Observation</div>
+                      <div className="wb-detail-text">
+                        {lastResult.observation.summary}
+                      </div>
+                    </div>
+                  )}
+
+                  {lastResult.finding && (
+                    <div className="wb-result-extra">
+                      <div className="wb-section-label">Finding</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <SeverityBadge severity={lastResult.finding.severity} size="sm" />
+                        <span className="wb-detail-text">{lastResult.finding.title}</span>
+                        {lastResult.finding.cwe && (
+                          <code style={{ fontSize: '10px', color: 'var(--accent)' }}>
+                            {lastResult.finding.cwe}
+                          </code>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {lastResult.evidence && (
+                    <div className="wb-result-extra">
+                      <div className="wb-section-label">Evidence</div>
+                      <div className="wb-detail-text">
+                        <code>{lastResult.evidence.id}</code> ·{' '}
+                        {lastResult.evidence.type} · SHA-256{' '}
+                        <code className="wb-break-all">
+                          {lastResult.evidence.sha256}
+                        </code>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
-          <div className="wb-panel-body" style={{ padding: '12px' }}>
-            {selectedExec ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <KeyValue
-                  items={[
-                    { key: 'Execution ID', value: selectedExec.id },
-                    { key: 'Assessment ID', value: selectedExec.assessmentId },
-                    { key: 'Rule Module', value: selectedExec.ruleId },
-                    { key: 'Target', value: selectedExec.target },
-                    {
-                      key: 'Scope Guard',
-                      value: (
-                        <span
-                          className="wb-chip"
-                          style={{
-                            background:
-                              selectedExec.scopeDecision === 'ALLOW'
-                                ? 'var(--status-pass-bg)'
-                                : 'var(--status-blocked-bg)',
-                            color:
-                              selectedExec.scopeDecision === 'ALLOW'
-                                ? 'var(--status-pass-text)'
-                                : 'var(--status-blocked-text)',
-                          }}
-                        >
-                          {selectedExec.scopeDecision}
-                        </span>
-                      ),
-                    },
-                    {
-                      key: 'Outcome Status',
-                      value: <StatusBadge status={selectedExec.status} size="sm" />,
-                    },
-                    {
-                      key: 'Execution Time',
-                      value: `${selectedExec.durationMs ?? '—'} ms`,
-                    },
-                    {
-                      key: 'Timestamp (UTC)',
-                      value: new Date(selectedExec.executedAt).toUTCString(),
-                    },
-                  ]}
+          <div className="wb-split-h wb-executions-bottom">
+            <div className="wb-panel">
+              <div className="wb-panel-header">
+                <div className="wb-panel-title">
+                  <Terminal size={14} color="var(--text-secondary)" />
+                  <span>Execution audit trail</span>
+                  <span className="wb-panel-count">{filteredExecutions.length}</span>
+                  {isDemoMode && <DemoBadge />}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => fetchExecutions()}
+                  className="wb-btn wb-btn-sm"
+                  title="Refetch executions from the backend"
+                >
+                  <RefreshCw size={10} /> Refresh
+                </button>
+              </div>
+              <div className="wb-panel-body">
+                <DataTable
+                  columns={columns}
+                  data={filteredExecutions}
+                  keyExtractor={(row) => row.id}
+                  selectedId={selectedExec?.id}
+                  onSelectRow={(row) => setSelectedExec(row)}
+                  emptyMessage={
+                    executions.length === 0
+                      ? 'No checks have been recorded by the backend.'
+                      : 'No executions match the selected status filter.'
+                  }
                 />
+              </div>
+            </div>
 
-                {selectedExec.errorMessage && (
-                  <div>
-                    <div
-                      style={{
-                        fontSize: '10px',
-                        fontWeight: 700,
-                        textTransform: 'uppercase',
-                        color: 'var(--status-blocked-text)',
-                        marginBottom: '4px',
-                      }}
-                    >
-                      Error / Scope Message
-                    </div>
-                    <pre
-                      style={{
-                        padding: '8px',
-                        background: 'var(--status-blocked-bg)',
-                        border: '1px solid var(--status-blocked-border)',
-                        color: 'var(--status-blocked-text)',
-                        fontSize: '11px',
-                        borderRadius: '3px',
-                        whiteSpace: 'pre-wrap',
-                      }}
-                    >
-                      {selectedExec.errorMessage}
-                    </pre>
+            <div className="wb-panel">
+              <div className="wb-panel-header">
+                <div className="wb-panel-title">
+                  <span>Execution details: {selectedExec?.id || 'None'}</span>
+                  {isDemoMode && <DemoBadge />}
+                </div>
+              </div>
+              <div className="wb-panel-body" style={{ padding: '12px' }}>
+                {selectedExec ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <KeyValue
+                      items={[
+                        { key: 'Execution ID', value: selectedExec.id },
+                        { key: 'Assessment', value: selectedExec.assessmentId },
+                        { key: 'Rule', value: selectedExec.ruleId },
+                        { key: 'Target', value: selectedExec.target },
+                        { key: 'Scope decision', value: selectedExec.scopeDecision },
+                        {
+                          key: 'Outcome',
+                          value: <StatusBadge status={selectedExec.status} size="sm" />,
+                        },
+                        {
+                          key: 'Duration',
+                          value:
+                            selectedExec.durationMs !== undefined
+                              ? `${selectedExec.durationMs} ms`
+                              : '—',
+                        },
+                        {
+                          key: 'Executed (UTC)',
+                          value: new Date(selectedExec.executedAt).toUTCString(),
+                        },
+                      ]}
+                    />
+
+                    {selectedExec.errorMessage && (
+                      <div>
+                        <div className="wb-section-label">Error / scope message</div>
+                        <pre className="wb-error-pre">{selectedExec.errorMessage}</pre>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="wb-no-selection">
+                    Select an execution record to inspect its backend telemetry.
                   </div>
                 )}
               </div>
-            ) : (
-              <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                Select an execution record to view complete operational telemetry.
-              </div>
-            )}
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Confirmation Modal Before Execution */}
       <ConfirmDialog
         isOpen={showConfirmModal}
-        title="Confirm Defensive Security Check Execution"
+        title="Confirm defensive security check execution"
         message={
           <div>
             <p style={{ marginBottom: '8px' }}>
-              You are about to execute the defensive security analyzer against target:
+              You are about to ask the backend to execute this check:
             </p>
-            <div
-              style={{
-                background: 'var(--bg-table-zebra)',
-                border: '1px solid var(--border-subtle)',
-                padding: '8px 12px',
-                borderRadius: '3px',
-                fontSize: '11px',
-                fontFamily: 'var(--font-mono)',
-              }}
-            >
+            <div className="wb-confirm-summary">
               <div><strong>Rule:</strong> {ruleId} ({selectedRuleMeta?.title})</div>
               <div><strong>Target:</strong> {target}</div>
-              <div><strong>Assessment ID:</strong> {assessmentId}</div>
+              <div><strong>Assessment:</strong> {assessmentId}</div>
+              <div><strong>Mode:</strong> LIVE</div>
             </div>
-            <p style={{ marginTop: '8px', fontSize: '11px', color: 'var(--text-muted)' }}>
-              Scope Guard will evaluate this target before any socket connection or network transmission.
-              Out-of-scope targets will be blocked immediately without touching the target.
+            <p className="wb-confirm-note">
+              The backend will re-validate this target against Scope Guard
+              immediately before execution. A BLOCK result cannot be bypassed.
             </p>
           </div>
         }
-        confirmLabel="Execute Now"
+        confirmLabel="Confirm &amp; Run"
         onConfirm={handleExecuteCheck}
         onCancel={() => setShowConfirmModal(false)}
       />

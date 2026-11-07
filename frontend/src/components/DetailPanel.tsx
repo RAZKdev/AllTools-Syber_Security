@@ -24,7 +24,7 @@ export const DetailPanel: React.FC<DetailPanelProps> = ({
   const currentTab = tabs.find((t) => t.id === activeTabId) || tabs[0];
 
   return (
-    <div className="wb-panel" style={{ height: '100%' }}>
+    <div className="wb-panel wb-detail-panel">
       <div className="wb-panel-header">
         <div className="wb-panel-title">{title}</div>
         {actions && <div>{actions}</div>}

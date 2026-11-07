@@ -15,6 +15,7 @@ class CheckExecutionBase(BaseModel):
     durationMs: Optional[int] = Field(None, ge=0)
     errorCode: Optional[str] = None
     errorMessage: Optional[str] = None
+    requestFingerprint: Optional[str] = None
     executedAt: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 

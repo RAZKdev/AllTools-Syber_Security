@@ -1,6 +1,15 @@
 import React from 'react';
 import { ExecutionStatus } from '@contracts/types';
-import { CheckCircle2, XCircle, AlertTriangle, HelpCircle, ShieldAlert, ShieldX } from 'lucide-react';
+import {
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  HelpCircle,
+  ShieldAlert,
+  ShieldX,
+  RefreshCw,
+  Clock3,
+} from 'lucide-react';
 
 interface StatusBadgeProps {
   status: ExecutionStatus | string;
@@ -12,6 +21,38 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'md' })
 
   const getStyleAndIcon = () => {
     switch (normStatus) {
+      case 'PENDING':
+        return {
+          color: 'var(--status-neutral-text)',
+          bg: 'var(--status-neutral-bg)',
+          border: 'var(--status-neutral-border)',
+          icon: <Clock3 size={size === 'sm' ? 12 : 14} />,
+          label: 'PENDING',
+        };
+      case 'RUNNING':
+        return {
+          color: 'var(--accent)',
+          bg: 'var(--accent-muted)',
+          border: 'var(--accent-border)',
+          icon: <RefreshCw size={size === 'sm' ? 12 : 14} className="spin" />,
+          label: 'RUNNING',
+        };
+      case 'INTERRUPTED':
+        return {
+          color: 'var(--status-warn-text)',
+          bg: 'var(--status-warn-bg)',
+          border: 'var(--status-warn-border)',
+          icon: <AlertTriangle size={size === 'sm' ? 12 : 14} />,
+          label: 'INTERRUPTED',
+        };
+      case 'UNKNOWN':
+        return {
+          color: 'var(--status-neutral-text)',
+          bg: 'var(--status-neutral-bg)',
+          border: 'var(--status-neutral-border)',
+          icon: <HelpCircle size={size === 'sm' ? 12 : 14} />,
+          label: 'UNKNOWN',
+        };
       case 'PASS':
         return {
           color: 'var(--status-pass-text)',
@@ -43,7 +84,7 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'md' })
           bg: 'var(--status-blocked-bg)',
           border: 'var(--status-blocked-border)',
           icon: <ShieldX size={size === 'sm' ? 12 : 14} />,
-          label: 'BLOCKED (OUT OF SCOPE)',
+          label: 'BLOCKED',
         };
       case 'ERROR':
         return {
@@ -76,6 +117,16 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, size = 'md' })
 
   return (
     <span
+      title={
+        normStatus === 'BLOCKED_OUT_OF_SCOPE' || normStatus === 'BLOCKED'
+          ? 'Blocked — target is outside the authorized scope'
+          : undefined
+      }
+      aria-label={
+        normStatus === 'BLOCKED_OUT_OF_SCOPE' || normStatus === 'BLOCKED'
+          ? 'Blocked — target is outside the authorized scope'
+          : undefined
+      }
       style={{
         display: 'inline-flex',
         alignItems: 'center',

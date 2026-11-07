@@ -1,105 +1,301 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { AppShell, ActiveTab } from '@/components/AppShell';
 import { BackendConnectionState } from '@/components/ConnectionStatus';
-import { api, ScopeGuardVerificationStatus } from '@/services/api';
-import { DEMO_SCOPE_ITEMS, DEMO_ENGAGEMENT } from '@/demo/fixtures';
+import {
+  api,
+  ApiError,
+  Assessment,
+  EnforcementStatus,
+  Engagement,
+} from '@/services/api';
+import {
+  DEMO_ASSESSMENT,
+  DEMO_ENGAGEMENT,
+  DEMO_SCOPE_ITEMS,
+} from '@/demo/fixtures';
 import { DashboardPage } from '@/pages/DashboardPage';
 import { ScopePage } from '@/pages/ScopePage';
 import { ExecutionsPage } from '@/pages/ExecutionsPage';
 import { FindingsPage } from '@/pages/FindingsPage';
 import { ReportsPage } from '@/pages/ReportsPage';
 
+const VALID_TABS: ActiveTab[] = [
+  'dashboard',
+  'scope',
+  'executions',
+  'findings',
+  'reports',
+];
+
+function isExpired(expiresAt?: string): boolean {
+  if (!expiresAt) return false;
+  const timestamp = Date.parse(expiresAt);
+  return Number.isFinite(timestamp) && timestamp <= Date.now();
+}
+
+function pickAssessment(
+  list: Assessment[],
+  preferredId?: string | null,
+): Assessment | null {
+  if (preferredId) {
+    const preferred = list.find((item) => item.id === preferredId);
+    if (preferred) return preferred;
+  }
+  const running = list
+    .filter((item) => item.status.toUpperCase() === 'RUNNING')
+    .sort((a, b) => {
+      const aTime = Date.parse(a.startedAt || a.createdAt || '');
+      const bTime = Date.parse(b.startedAt || b.createdAt || '');
+      return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
+    });
+  return running[0] || list[0] || null;
+}
+
 export const App: React.FC = () => {
-  // Mandate: Aplikasi selalu memulai dalam Live Mode (unless explicitly requested via URL param)
-  const [isDemoMode, setIsDemoMode] = useState<boolean>(() => {
-    return new URLSearchParams(window.location.search).get('demo') === 'true';
-  });
+  // Demo Mode is never activated by a URL parameter or a failed request.
+  // It only turns on after an explicit user action in this session.
+  const [isDemoMode, setIsDemoMode] = useState<boolean>(false);
 
   const [currentTab, setCurrentTab] = useState<ActiveTab>(() => {
     const tabParam = new URLSearchParams(window.location.search).get('tab');
-    if (tabParam && ['dashboard', 'scope', 'executions', 'findings', 'reports'].includes(tabParam)) {
+    if (tabParam && VALID_TABS.includes(tabParam as ActiveTab)) {
       return tabParam as ActiveTab;
     }
     return 'dashboard';
   });
 
-  // Backend Connectivity & Scope Guard Probe State
-  const [connectionState, setConnectionState] = useState<BackendConnectionState>('checking');
-  const [isScopeGuardVerified, setIsScopeGuardVerified] = useState<boolean>(false);
-  const [scopeGuardStatus, setScopeGuardStatus] = useState<ScopeGuardVerificationStatus>('CHECKING');
-  const [isScopeGuardChecking, setIsScopeGuardChecking] = useState<boolean>(false);
-  const [scopeRulesCount, setScopeRulesCount] = useState<number>(0);
-  const [activeEngagementName, setActiveEngagementName] = useState<string>('Laboratory Defensive Security Assessment');
+  // Backend connectivity
+  const [connectionState, setConnectionState] =
+    useState<BackendConnectionState>('checking');
+  const [lastCheckedAt, setLastCheckedAt] = useState<Date | null>(null);
 
-  // Verification & Health Check Logic
-  const checkBackendHealth = useCallback(async () => {
-    setConnectionState((prev) => (prev === 'connected' ? 'connected' : 'checking'));
-    try {
-      const health = await api.getHealth();
-      if (health.status === 'healthy') {
-        setConnectionState('connected');
-      } else {
-        setConnectionState('error');
+  // Scope Guard enforcement verification (separate from connectivity)
+  const [enforcementStatus, setEnforcementStatus] =
+    useState<EnforcementStatus>('not_checked');
+  const [enforcementReason, setEnforcementReason] = useState<string>('');
+  const isScopeGuardChecking = enforcementStatus === 'checking';
+
+  // Workspace context
+  const [engagements, setEngagements] = useState<Engagement[]>([]);
+  const [assessments, setAssessments] = useState<Assessment[]>([]);
+  const [selectedEngagementId, setSelectedEngagementId] = useState<string | null>(
+    null,
+  );
+  const [selectedAssessmentId, setSelectedAssessmentId] = useState<string | null>(
+    null,
+  );
+  const [contextLoading, setContextLoading] = useState<boolean>(true);
+  const [contextError, setContextError] = useState<string | null>(null);
+  const [scopeRulesCount, setScopeRulesCount] = useState<number | null>(null);
+
+  const [refreshNonce, setRefreshNonce] = useState<number>(0);
+  const contextRequestId = useRef(0);
+  const selectedEngagementIdRef = useRef<string | null>(null);
+  const selectedAssessmentIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    selectedEngagementIdRef.current = selectedEngagementId;
+    selectedAssessmentIdRef.current = selectedAssessmentId;
+  }, [selectedEngagementId, selectedAssessmentId]);
+
+  const loadScopeSummary = useCallback(
+    async (engagementId: string | null, demo: boolean) => {
+      if (demo) {
+        setScopeRulesCount(
+          DEMO_SCOPE_ITEMS.filter(
+            (item) => item.inScope && !isExpired(item.expiresAt),
+          ).length,
+        );
+        return;
       }
-    } catch {
-      setConnectionState('offline');
-      setIsScopeGuardVerified(false);
-      setScopeGuardStatus('UNVERIFIED');
+      if (!engagementId) {
+        setScopeRulesCount(null);
+        return;
+      }
+      const requestId = contextRequestId.current;
+      try {
+        const items = await api.getScopeItems(engagementId);
+        if (contextRequestId.current !== requestId) return;
+        setScopeRulesCount(
+          items.filter((item) => item.inScope && !isExpired(item.expiresAt)).length,
+        );
+      } catch {
+        if (contextRequestId.current !== requestId) return;
+        // An error is not zero rules. Keep the value unknown.
+        setScopeRulesCount(null);
+      }
+    },
+    [],
+  );
+
+  const loadWorkspaceContext = useCallback(
+    async (options?: {
+      engagementId?: string | null;
+      assessmentId?: string | null;
+      demo?: boolean;
+    }) => {
+      const demo = options?.demo ?? false;
+      if (demo) {
+        contextRequestId.current += 1;
+        setEngagements([DEMO_ENGAGEMENT]);
+        setAssessments([DEMO_ASSESSMENT]);
+        setSelectedEngagementId(DEMO_ENGAGEMENT.id);
+        setSelectedAssessmentId(DEMO_ASSESSMENT.id);
+        setContextLoading(false);
+        setContextError(null);
+        await loadScopeSummary(DEMO_ENGAGEMENT.id, true);
+        return;
+      }
+
+      const requestId = contextRequestId.current + 1;
+      contextRequestId.current = requestId;
+      setContextLoading(true);
+      setContextError(null);
+
+      try {
+        const engagementList = await api.getEngagements();
+        if (contextRequestId.current !== requestId) return;
+
+        const preferredEngagement =
+          engagementList.find(
+            (item) =>
+              item.id ===
+              (options?.engagementId ||
+                selectedEngagementIdRef.current ||
+                undefined),
+          ) ||
+          engagementList.find(
+            (item) => item.status.toUpperCase() === 'ACTIVE',
+          ) ||
+          engagementList[0] ||
+          null;
+
+        if (!preferredEngagement) {
+          setEngagements([]);
+          setAssessments([]);
+          setSelectedEngagementId(null);
+          setSelectedAssessmentId(null);
+          setScopeRulesCount(null);
+          setContextLoading(false);
+          return;
+        }
+
+        const assessmentList = await api.getAssessments(preferredEngagement.id);
+        if (contextRequestId.current !== requestId) return;
+
+        const preferredAssessment = pickAssessment(
+          assessmentList,
+          options?.assessmentId || selectedAssessmentIdRef.current,
+        );
+
+        setEngagements(engagementList);
+        setAssessments(assessmentList);
+        setSelectedEngagementId(preferredEngagement.id);
+        setSelectedAssessmentId(preferredAssessment?.id || null);
+        setContextLoading(false);
+        await loadScopeSummary(preferredEngagement.id, false);
+      } catch (err: any) {
+        if (contextRequestId.current !== requestId) return;
+        // Do not keep a stale context visible as if it were current.
+        setEngagements([]);
+        setAssessments([]);
+        setSelectedEngagementId(null);
+        setSelectedAssessmentId(null);
+        setScopeRulesCount(null);
+        setContextError(
+          err?.message || 'Unable to load engagement and assessment context.',
+        );
+        setContextLoading(false);
+      }
+    },
+    [loadScopeSummary],
+  );
+
+  const checkBackendHealth = useCallback(async () => {
+    try {
+      await api.getHealth();
+      setConnectionState('connected');
+      setLastCheckedAt(new Date());
+    } catch (err) {
+      setConnectionState(err instanceof ApiError ? 'api_error' : 'offline');
+      setLastCheckedAt(new Date());
     }
   }, []);
 
-  const verifyScopeGuardProbe = useCallback(async () => {
+  // Initial context + demo/live transition
+  useEffect(() => {
     if (isDemoMode) {
-      setIsScopeGuardVerified(true);
-      setScopeGuardStatus('VERIFIED_ACTIVE');
+      setEnforcementStatus('demo');
+      setEnforcementReason('Demo Mode does not run enforcement probes.');
+      loadWorkspaceContext({ demo: true });
       return;
     }
+    setEnforcementStatus((current) =>
+      current === 'demo' ? 'not_checked' : current,
+    );
+    loadWorkspaceContext({ demo: false });
+  }, [isDemoMode, loadWorkspaceContext]);
 
-    setIsScopeGuardChecking(true);
-    try {
-      const probeResult = await api.probeScopeGuard('ASM-001');
-      setIsScopeGuardVerified(probeResult.isVerified);
-      setScopeGuardStatus(probeResult.status);
-    } catch {
-      setIsScopeGuardVerified(false);
-      setScopeGuardStatus('UNVERIFIED');
-    } finally {
-      setIsScopeGuardChecking(false);
-    }
-  }, [isDemoMode]);
-
-  const refreshScopeCount = useCallback(async () => {
-    if (isDemoMode) {
-      setScopeRulesCount(DEMO_SCOPE_ITEMS.length);
-      setActiveEngagementName(DEMO_ENGAGEMENT.name);
-      return;
-    }
-
-    try {
-      const items = await api.getScopeItems();
-      setScopeRulesCount(items.length);
-      const engagements = await api.getEngagements();
-      if (engagements.length > 0) {
-        setActiveEngagementName(engagements[0].name);
-      }
-    } catch {
-      setScopeRulesCount(0);
-    }
-  }, [isDemoMode]);
-
-  // Initial mount verification
+  // Health polling: 15s while visible, plus an immediate check on focus.
   useEffect(() => {
     checkBackendHealth();
-    verifyScopeGuardProbe();
-    refreshScopeCount();
+    const intervalId = window.setInterval(() => {
+      if (!document.hidden) checkBackendHealth();
+    }, 15000);
+    const onVisibilityChange = () => {
+      if (!document.hidden) checkBackendHealth();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.clearInterval(intervalId);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [checkBackendHealth]);
 
-    // Periodic connectivity & health check every 6s
-    const healthInterval = setInterval(() => {
-      checkBackendHealth();
-    }, 6000);
+  // Enforcement probe: live only, one active assessment, after connectivity is proven.
+  useEffect(() => {
+    if (isDemoMode) {
+      setEnforcementStatus('demo');
+      setEnforcementReason('Demo Mode does not run enforcement probes.');
+      return;
+    }
+    if (connectionState !== 'connected') {
+      setEnforcementStatus(
+        connectionState === 'offline' || connectionState === 'api_error'
+          ? 'unavailable'
+          : 'not_checked',
+      );
+      setEnforcementReason(
+        connectionState === 'offline' || connectionState === 'api_error'
+          ? 'Enforcement cannot be verified while the backend is unreachable.'
+          : '',
+      );
+      return;
+    }
+    if (!selectedAssessmentId) {
+      setEnforcementStatus('not_checked');
+      setEnforcementReason('No active assessment is available for the probe.');
+      return;
+    }
 
-    return () => clearInterval(healthInterval);
-  }, [checkBackendHealth, verifyScopeGuardProbe, refreshScopeCount]);
+    let cancelled = false;
+    setEnforcementStatus('checking');
+    setEnforcementReason('');
+    api.probeScopeGuard(selectedAssessmentId).then((result) => {
+      if (cancelled) return;
+      setEnforcementStatus(result.status);
+      setEnforcementReason(result.reason);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isDemoMode, connectionState, selectedAssessmentId, refreshNonce]);
+
+  // Refresh the scope summary when the engagement context changes.
+  useEffect(() => {
+    if (isDemoMode) return;
+    loadScopeSummary(selectedEngagementId, false);
+  }, [isDemoMode, selectedEngagementId, refreshNonce, loadScopeSummary]);
 
   // Desktop launcher heartbeat & beforeunload shutdown preservation
   useEffect(() => {
@@ -108,7 +304,7 @@ export const App: React.FC = () => {
     };
 
     sendHeartbeat();
-    const intervalId = setInterval(sendHeartbeat, 2500);
+    const intervalId = window.setInterval(sendHeartbeat, 2500);
 
     const handleBeforeUnload = () => {
       if (navigator.sendBeacon) {
@@ -121,12 +317,11 @@ export const App: React.FC = () => {
     window.addEventListener('beforeunload', handleBeforeUnload);
 
     return () => {
-      clearInterval(intervalId);
+      window.clearInterval(intervalId);
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, []);
 
-  // Handle synchronized tab change
   const handleTabChange = (tab: ActiveTab) => {
     setCurrentTab(tab);
     const url = new URL(window.location.href);
@@ -134,65 +329,138 @@ export const App: React.FC = () => {
     window.history.replaceState({}, '', url.toString());
   };
 
-  // Handle explicit demo toggle with synchronized URL parameter
   const handleToggleDemo = () => {
-    setIsDemoMode((prev) => {
-      const next = !prev;
-      const url = new URL(window.location.href);
-      if (next) {
-        url.searchParams.set('demo', 'true');
-      } else {
-        url.searchParams.delete('demo');
-      }
-      window.history.replaceState({}, '', url.toString());
-      return next;
-    });
+    setIsDemoMode((previous) => !previous);
+  };
+
+  const handleSelectEngagement = (engagementId: string) => {
+    setSelectedEngagementId(engagementId);
+    setSelectedAssessmentId(null);
+    loadWorkspaceContext({ engagementId, assessmentId: null });
+  };
+
+  const handleSelectAssessment = (assessmentId: string) => {
+    setSelectedAssessmentId(assessmentId);
+    setRefreshNonce((value) => value + 1);
   };
 
   const handleRefreshAll = () => {
+    setRefreshNonce((value) => value + 1);
     checkBackendHealth();
-    verifyScopeGuardProbe();
-    refreshScopeCount();
+    if (!isDemoMode) loadWorkspaceContext();
   };
+
+  const selectedEngagement = isDemoMode
+    ? DEMO_ENGAGEMENT
+    : engagements.find((item) => item.id === selectedEngagementId) || null;
+  const selectedAssessment = isDemoMode
+    ? DEMO_ASSESSMENT
+    : assessments.find((item) => item.id === selectedAssessmentId) || null;
+
+  // Remount page views when the active scope context changes so in-flight
+  // requests from a previous assessment cannot overwrite the new view.
+  const pageKey = isDemoMode
+    ? 'demo'
+    : `${selectedEngagementId || 'no-engagement'}:${selectedAssessmentId || 'no-assessment'}`;
 
   return (
     <AppShell
       currentTab={currentTab}
       onTabChange={handleTabChange}
-      activeEngagementName={activeEngagementName}
       isDemoMode={isDemoMode}
       onToggleDemo={handleToggleDemo}
       connectionState={connectionState}
-      isScopeGuardVerified={isScopeGuardVerified}
+      lastCheckedAt={lastCheckedAt}
+      enforcementStatus={enforcementStatus}
+      enforcementReason={enforcementReason}
       isScopeGuardChecking={isScopeGuardChecking}
-      scopeGuardStatus={scopeGuardStatus}
-      scopeRulesCount={scopeRulesCount}
       onRefreshConnection={handleRefreshAll}
+      scopeRulesCount={scopeRulesCount}
+      engagements={isDemoMode ? [DEMO_ENGAGEMENT] : engagements}
+      assessments={isDemoMode ? [DEMO_ASSESSMENT] : assessments}
+      selectedEngagementId={selectedEngagementId}
+      selectedAssessmentId={selectedAssessmentId}
+      onSelectEngagement={handleSelectEngagement}
+      onSelectAssessment={handleSelectAssessment}
+      contextLoading={contextLoading}
+      contextError={contextError}
+      selectedEngagementName={selectedEngagement?.name || null}
+      selectedAssessmentName={selectedAssessment?.name || null}
     >
       {currentTab === 'dashboard' && (
         <DashboardPage
+          key={pageKey}
           isDemoMode={isDemoMode}
+          assessmentId={selectedAssessmentId}
+          engagementId={selectedEngagementId}
+          engagement={selectedEngagement}
+          assessment={selectedAssessment}
+          connectionState={connectionState}
+          contextLoading={contextLoading}
+          contextError={contextError}
+          onRetryContext={handleRefreshAll}
+          refreshToken={refreshNonce}
           onNavigateTab={handleTabChange}
         />
       )}
 
       {currentTab === 'scope' && (
         <ScopePage
+          key={pageKey}
           isDemoMode={isDemoMode}
-          onScopeUpdated={refreshScopeCount}
+          assessmentId={selectedAssessmentId}
+          engagementId={selectedEngagementId}
+          connectionState={connectionState}
+          contextLoading={contextLoading}
+          contextError={contextError}
+          onRetryContext={handleRefreshAll}
+          refreshToken={refreshNonce}
+          enforcementStatus={enforcementStatus}
+          onScopeUpdated={() => loadScopeSummary(selectedEngagementId, false)}
         />
       )}
 
       {currentTab === 'executions' && (
-        <ExecutionsPage isDemoMode={isDemoMode} />
+        <ExecutionsPage
+          key={pageKey}
+          isDemoMode={isDemoMode}
+          assessmentId={selectedAssessmentId}
+          connectionState={connectionState}
+          contextLoading={contextLoading}
+          contextError={contextError}
+          onRetryContext={handleRefreshAll}
+          refreshToken={refreshNonce}
+          onExecutionsChanged={() =>
+            loadScopeSummary(selectedEngagementId, false)
+          }
+        />
       )}
 
       {currentTab === 'findings' && (
-        <FindingsPage isDemoMode={isDemoMode} />
+        <FindingsPage
+          key={pageKey}
+          isDemoMode={isDemoMode}
+          assessmentId={selectedAssessmentId}
+          connectionState={connectionState}
+          contextLoading={contextLoading}
+          contextError={contextError}
+          onRetryContext={handleRefreshAll}
+          refreshToken={refreshNonce}
+        />
       )}
 
       {currentTab === 'reports' && (
-        <ReportsPage isDemoMode={isDemoMode} />
+        <ReportsPage
+          key={pageKey}
+          isDemoMode={isDemoMode}
+          assessmentId={selectedAssessmentId}
+          connectionState={connectionState}
+          contextLoading={contextLoading}
+          contextError={contextError}
+          onRetryContext={handleRefreshAll}
+          refreshToken={refreshNonce}
+          onNavigateTab={handleTabChange}
+        />
       )}
     </AppShell>
   );

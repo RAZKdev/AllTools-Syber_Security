@@ -1,17 +1,36 @@
+import hashlib
+import json
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, Field
 
-from app.schemas.common import ExecutionStatus, ScopeDecision, FindingStatus
+from app.schemas.common import (
+    ExecutionStatus,
+    ScopeDecision,
+    FindingStatus,
+    TERMINAL_EXECUTION_STATUSES,
+)
 from app.schemas.check_execution import CheckExecution
 from app.schemas.finding import FindingCreate
 from app.schemas.evidence import EvidenceType
 from app.schemas.assessment import Assessment, AssessmentStatus
 from app.schemas.engagement import Engagement, EngagementStatus
+from app.repositories.interfaces import (
+    IEvidenceRepository,
+    IExecutionRepository,
+    IFindingsRepository,
+    IScopeRepository,
+)
 from app.repositories.scope_repository import scope_repository
-from app.repositories.findings_repository import findings_repository
+from app.dependencies import (
+    get_evidence_repository,
+    get_execution_repository,
+    get_findings_repository,
+    get_scope_repository,
+)
+from app.services.durable_evidence_writer import DurableEvidenceWriter
 from app.services.scope_guard import ScopeGuard, ScopeDecisionResult
 from evidence.storage import evidence_store
 
@@ -39,9 +58,6 @@ from security.rules.auth.sec_auth_001 import SecAuth001Rule
 
 router = APIRouter(prefix="/executions")
 scope_guard = ScopeGuard()
-
-# In-memory execution store for local workbench
-_executions: Dict[str, CheckExecution] = {}
 
 AVAILABLE_RULES_METADATA = [
     {
@@ -125,6 +141,7 @@ AVAILABLE_RULES_METADATA = [
 
 
 class PreFlightCheckRequest(BaseModel):
+    id: Optional[str] = None
     assessmentId: str = Field(..., min_length=1)
     engagementId: Optional[str] = None
     ruleId: str = Field(..., min_length=1)
@@ -139,6 +156,7 @@ class PreFlightCheckResponse(BaseModel):
 
 
 class RunCheckRequest(BaseModel):
+    id: Optional[str] = None
     assessmentId: str = Field(..., min_length=1)
     engagementId: Optional[str] = None
     assetId: Optional[str] = "AST-001"
@@ -156,9 +174,34 @@ class RunCheckResponse(BaseModel):
     message: str
 
 
+def compute_request_fingerprint(
+    assessment_id: str,
+    rule_id: str,
+    target: str,
+    engagement_id: Optional[str] = None,
+    asset_id: Optional[str] = None,
+    simulated_data: Optional[Dict[str, Any]] = None,
+    *,
+    operation: str,
+) -> str:
+    """Compute deterministic SHA-256 fingerprint scoped to one execution operation."""
+    canonical = {
+        "operation": operation,
+        "assessmentId": assessment_id,
+        "engagementId": engagement_id or "",
+        "ruleId": rule_id,
+        "target": target.strip().lower(),
+        "assetId": asset_id or "AST-001",
+        "simulatedData": simulated_data or {},
+    }
+    dumped = json.dumps(canonical, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(dumped.encode("utf-8")).hexdigest()
+
+
 def validate_execution_authorization(
     assessment_id: str,
     engagement_id: Optional[str] = None,
+    scope_repo: Optional[IScopeRepository] = None,
 ) -> Tuple[Assessment, Engagement]:
     """
     Server-side authorization and lifecycle state validation.
@@ -169,14 +212,15 @@ def validate_execution_authorization(
     - Engagement status must be ACTIVE (409)
     - Assessment status must be RUNNING (409)
     """
-    assessment = scope_repository.get_assessment(assessment_id)
+    repo = scope_repo if scope_repo is not None else scope_repository
+    assessment = repo.get_assessment(assessment_id)
     if not assessment:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Assessment '{assessment_id}' not found.",
         )
 
-    engagement = scope_repository.get_engagement(assessment.engagementId)
+    engagement = repo.get_engagement(assessment.engagementId)
     if not engagement:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -211,9 +255,35 @@ def get_available_rules():
 
 
 @router.post("/pre-flight", response_model=PreFlightCheckResponse)
-def pre_flight_check(payload: PreFlightCheckRequest) -> PreFlightCheckResponse:
+def pre_flight_check(
+    payload: PreFlightCheckRequest,
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+    scope_repo: IScopeRepository = Depends(get_scope_repository),
+    exec_repo: IExecutionRepository = Depends(get_execution_repository),
+) -> PreFlightCheckResponse:
     """Pre-flight check verifying target is within authorized scope."""
-    assessment, engagement = validate_execution_authorization(payload.assessmentId, payload.engagementId)
+    if idempotency_key and payload.id and idempotency_key != payload.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Conflicting execution identifiers: 'Idempotency-Key' header ('{idempotency_key}') does not match 'id' field in request body ('{payload.id}').",
+        )
+    execution_id = idempotency_key or payload.id or f"CHK-{uuid.uuid4().hex[:8]}"
+    # Pre-flight records are audit-only and must never collide with run execution IDs.
+    preflight_execution_id = (
+        execution_id if execution_id.startswith("PRE-") else f"PRE-{execution_id}"
+    )
+
+    assessment, engagement = validate_execution_authorization(
+        payload.assessmentId, payload.engagementId, scope_repo=scope_repo
+    )
+
+    fingerprint = compute_request_fingerprint(
+        assessment_id=payload.assessmentId,
+        rule_id=payload.ruleId,
+        target=payload.target,
+        engagement_id=payload.engagementId,
+        operation="pre-flight",
+    )
 
     OFFLINE_ANALYSIS_RULES = {"SEC-AUTH-001", "SEC-CRYPTO-001"}
     cleaned_target = payload.target.strip()
@@ -232,15 +302,14 @@ def pre_flight_check(payload: PreFlightCheckRequest) -> PreFlightCheckResponse:
             reason="Authorized local analytical check (offline evaluation, zero external network transmission).",
         )
     else:
-        scope_items = scope_repository.get_scope_for_assessment(payload.assessmentId)
+        scope_items = scope_repo.get_scope_for_assessment(payload.assessmentId)
         decision = scope_guard.evaluate_target(payload.assessmentId, payload.target, scope_items)
 
-    execution_id = f"CHK-{uuid.uuid4().hex[:8]}"
     now = datetime.now(timezone.utc)
 
     if not decision.is_allowed:
         record = CheckExecution(
-            id=execution_id,
+            id=preflight_execution_id,
             assessmentId=payload.assessmentId,
             ruleId=payload.ruleId,
             target=payload.target,
@@ -248,9 +317,16 @@ def pre_flight_check(payload: PreFlightCheckRequest) -> PreFlightCheckResponse:
             status=ExecutionStatus.BLOCKED_OUT_OF_SCOPE,
             errorCode="SCOPE_VIOLATION",
             errorMessage=decision.reason,
+            requestFingerprint=fingerprint,
             executedAt=now,
         )
-        _executions[execution_id] = record
+        try:
+            exec_repo.record_execution(record)
+        except Exception as persist_err:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Audit failure: Failed to persist pre-flight execution record: {persist_err}",
+            )
         return PreFlightCheckResponse(
             allowed=False,
             executionRecord=record,
@@ -258,15 +334,22 @@ def pre_flight_check(payload: PreFlightCheckRequest) -> PreFlightCheckResponse:
         )
 
     record = CheckExecution(
-        id=execution_id,
+        id=preflight_execution_id,
         assessmentId=payload.assessmentId,
         ruleId=payload.ruleId,
         target=payload.target,
         scopeDecision=ScopeDecision.ALLOW,
         status=ExecutionStatus.PASS,
+        requestFingerprint=fingerprint,
         executedAt=now,
     )
-    _executions[execution_id] = record
+    try:
+        exec_repo.record_execution(record)
+    except Exception as persist_err:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Audit failure: Failed to persist pre-flight execution record: {persist_err}",
+        )
     return PreFlightCheckResponse(
         allowed=True,
         executionRecord=record,
@@ -275,13 +358,41 @@ def pre_flight_check(payload: PreFlightCheckRequest) -> PreFlightCheckResponse:
 
 
 @router.post("/run", response_model=RunCheckResponse)
-def run_check(payload: RunCheckRequest) -> RunCheckResponse:
+def run_check(
+    payload: RunCheckRequest,
+    idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
+    scope_repo: IScopeRepository = Depends(get_scope_repository),
+    exec_repo: IExecutionRepository = Depends(get_execution_repository),
+    findings_repo: IFindingsRepository = Depends(get_findings_repository),
+    evidence_repo: IEvidenceRepository = Depends(get_evidence_repository),
+) -> RunCheckResponse:
     """
-    Run defensive security check with mandatory Scope Guard verification.
-    If scope check fails, execution terminates immediately with BLOCKED_OUT_OF_SCOPE.
+    Run defensive security check with mandatory Scope Guard verification and durable
+    atomic write-ahead execution reservation (PENDING -> RUNNING -> terminal outcome).
     """
-    assessment, engagement = validate_execution_authorization(payload.assessmentId, payload.engagementId)
+    if idempotency_key and payload.id and idempotency_key != payload.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Conflicting execution identifiers: 'Idempotency-Key' header ('{idempotency_key}') does not match 'id' field in request body ('{payload.id}').",
+        )
+    execution_id = idempotency_key or payload.id or f"CHK-{uuid.uuid4().hex[:8]}"
 
+    assessment, engagement = validate_execution_authorization(
+        payload.assessmentId, payload.engagementId, scope_repo=scope_repo
+    )
+
+    fingerprint = compute_request_fingerprint(
+        assessment_id=payload.assessmentId,
+        rule_id=payload.ruleId,
+        target=payload.target,
+        engagement_id=payload.engagementId,
+        asset_id=payload.assetId,
+        simulated_data=payload.simulatedData,
+        operation="run",
+    )
+    now = datetime.now(timezone.utc)
+
+    # 1. Scope Guard Evaluation upfront
     OFFLINE_ANALYSIS_RULES = {"SEC-AUTH-001", "SEC-CRYPTO-001"}
     cleaned_target = payload.target.strip()
     if not cleaned_target:
@@ -299,15 +410,12 @@ def run_check(payload: RunCheckRequest) -> RunCheckResponse:
             reason="Authorized local analytical check (offline evaluation, zero external network transmission).",
         )
     else:
-        scope_items = scope_repository.get_scope_for_assessment(payload.assessmentId)
+        scope_items = scope_repo.get_scope_for_assessment(payload.assessmentId)
         decision = scope_guard.evaluate_target(payload.assessmentId, payload.target, scope_items)
 
-    execution_id = f"CHK-{uuid.uuid4().hex[:8]}"
-    now = datetime.now(timezone.utc)
-
-    # If blocked by Scope Guard, fail closed immediately
+    # If blocked by Scope Guard, record terminal BLOCKED_OUT_OF_SCOPE and abort
     if not decision.is_allowed:
-        record = CheckExecution(
+        blocked_record = CheckExecution(
             id=execution_id,
             assessmentId=payload.assessmentId,
             ruleId=payload.ruleId,
@@ -316,16 +424,92 @@ def run_check(payload: RunCheckRequest) -> RunCheckResponse:
             status=ExecutionStatus.BLOCKED_OUT_OF_SCOPE,
             errorCode="SCOPE_VIOLATION",
             errorMessage=decision.reason,
+            requestFingerprint=fingerprint,
             executedAt=now,
         )
-        _executions[execution_id] = record
+        try:
+            exec_repo.record_execution(blocked_record)
+        except ValueError as conflict_err:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=str(conflict_err),
+            )
+        except Exception as persist_err:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Audit failure: Failed to persist blocked execution record: {persist_err}",
+            )
         return RunCheckResponse(
             allowed=False,
-            executionRecord=record,
+            executionRecord=blocked_record,
             message=decision.format_scope_block(),
         )
 
-    # Allowed: Proceed with security rule execution
+    # 2. Atomic Execution Reservation (PENDING)
+    pending_record = CheckExecution(
+        id=execution_id,
+        assessmentId=payload.assessmentId,
+        ruleId=payload.ruleId,
+        target=payload.target,
+        scopeDecision=ScopeDecision.ALLOW,
+        status=ExecutionStatus.PENDING,
+        requestFingerprint=fingerprint,
+        executedAt=now,
+    )
+    try:
+        reserved_record, is_newly_reserved = exec_repo.reserve_execution(pending_record)
+    except ValueError as conflict_err:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(conflict_err),
+        )
+    except Exception as e:
+        # P0 Requirement: Do not invoke tool if initial DB reservation fails
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Audit failure: Failed to atomically reserve execution record: {e}. Tool invocation aborted.",
+        )
+
+    # If not newly reserved, an existing execution with this ID is already in flight or completed
+    if not is_newly_reserved:
+        if reserved_record.status in (ExecutionStatus.PENDING, ExecutionStatus.RUNNING):
+            return RunCheckResponse(
+                allowed=True,
+                executionRecord=reserved_record,
+                message=f"Execution '{execution_id}' is currently in-progress ({reserved_record.status.value}).",
+            )
+        if reserved_record.status in TERMINAL_EXECUTION_STATUSES:
+            return RunCheckResponse(
+                allowed=(reserved_record.scopeDecision == ScopeDecision.ALLOW),
+                executionRecord=reserved_record,
+                message=f"Idempotent replay: Execution '{execution_id}' already completed with status {reserved_record.status.value}.",
+            )
+
+    # 3. Exclusive owner: Transition to RUNNING state before dispatching tool
+    running_record = CheckExecution(
+        id=execution_id,
+        assessmentId=payload.assessmentId,
+        ruleId=payload.ruleId,
+        target=payload.target,
+        scopeDecision=ScopeDecision.ALLOW,
+        status=ExecutionStatus.RUNNING,
+        requestFingerprint=fingerprint,
+        executedAt=now,
+    )
+    try:
+        exec_repo.record_execution(running_record)
+    except ValueError as conflict_err:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(conflict_err),
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Audit failure: Failed to transition execution to RUNNING state: {e}. Tool invocation aborted.",
+        )
+
+    # 4. Dispatch the Security Tool
     start_time = datetime.now(timezone.utc)
     obs = None
     fnd = None
@@ -496,44 +680,54 @@ def run_check(payload: RunCheckRequest) -> RunCheckResponse:
 
         duration_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
 
-        # Store finding if generated
-        if fnd:
-            findings_repository.create_finding(FindingCreate(**fnd))
+        # Persist finding, evidence, and terminal execution record to SQLite
+        try:
+            if fnd:
+                findings_repo.create_finding(FindingCreate(**fnd))
 
-        # Store evidence
-        if evd:
-            evidence_store.record_evidence(
-                assessment_id=payload.assessmentId,
-                evidence_type=EvidenceType.JSON_RESULT,
-                source=payload.target,
-                raw_content=evd,
-                finding_id=fnd["id"] if fnd else None,
-                notes=evd.get("notes"),
+            if evd:
+                writer = DurableEvidenceWriter(evidence_repo=evidence_repo)
+                persisted_ev = writer.write_evidence(
+                    assessment_id=payload.assessmentId,
+                    evidence_type=EvidenceType.JSON_RESULT,
+                    source=payload.target,
+                    raw_content=evd,
+                    finding_id=fnd["id"] if fnd else None,
+                    notes=evd.get("notes"),
+                )
+                evidence_store._evidence_records[persisted_ev.id] = persisted_ev
+
+            terminal_record = CheckExecution(
+                id=execution_id,
+                assessmentId=payload.assessmentId,
+                ruleId=payload.ruleId,
+                target=payload.target,
+                scopeDecision=ScopeDecision.ALLOW,
+                status=exec_status,
+                durationMs=duration_ms,
+                requestFingerprint=fingerprint,
+                executedAt=now,
+            )
+            saved_record = exec_repo.record_execution(terminal_record)
+
+            return RunCheckResponse(
+                allowed=True,
+                executionRecord=saved_record,
+                observation=obs,
+                finding=fnd,
+                evidence=evd,
+                message=f"Check completed with status {exec_status.value}.",
+            )
+        except Exception as persist_err:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Audit failure: Tool completed ({exec_status.value}), but persisting terminal outcome failed: {persist_err}. Execution remains preserved in RUNNING state for audit reconciliation.",
             )
 
-        record = CheckExecution(
-            id=execution_id,
-            assessmentId=payload.assessmentId,
-            ruleId=payload.ruleId,
-            target=payload.target,
-            scopeDecision=ScopeDecision.ALLOW,
-            status=exec_status,
-            durationMs=duration_ms,
-            executedAt=now,
-        )
-        _executions[execution_id] = record
-
-        return RunCheckResponse(
-            allowed=True,
-            executionRecord=record,
-            observation=obs,
-            finding=fnd,
-            evidence=evd,
-            message=f"Check completed with status {exec_status.value}.",
-        )
-
+    except HTTPException:
+        raise
     except Exception as e:
-        record = CheckExecution(
+        error_record = CheckExecution(
             id=execution_id,
             assessmentId=payload.assessmentId,
             ruleId=payload.ruleId,
@@ -542,28 +736,39 @@ def run_check(payload: RunCheckRequest) -> RunCheckResponse:
             status=ExecutionStatus.ERROR,
             errorCode="EXECUTION_ERROR",
             errorMessage=str(e),
+            requestFingerprint=fingerprint,
             executedAt=now,
         )
-        _executions[execution_id] = record
+        try:
+            exec_repo.record_execution(error_record)
+        except Exception as persist_err:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Audit failure: Tool execution failed and error persistence also failed: {persist_err}. Record remains preserved in RUNNING state for audit reconciliation.",
+            )
         return RunCheckResponse(
             allowed=True,
-            executionRecord=record,
+            executionRecord=error_record,
             message=f"Check execution error: {str(e)}",
         )
 
 
 @router.get("", response_model=List[CheckExecution])
-def list_executions(assessment_id: Optional[str] = None) -> List[CheckExecution]:
+def list_executions(
+    assessment_id: Optional[str] = None,
+    exec_repo: IExecutionRepository = Depends(get_execution_repository),
+) -> List[CheckExecution]:
     """List recorded check executions."""
-    if assessment_id:
-        return [e for e in _executions.values() if e.assessmentId == assessment_id]
-    return list(_executions.values())
+    return exec_repo.list_executions(assessment_id=assessment_id)
 
 
 @router.get("/{execution_id}", response_model=CheckExecution)
-def get_execution(execution_id: str) -> CheckExecution:
+def get_execution(
+    execution_id: str,
+    exec_repo: IExecutionRepository = Depends(get_execution_repository),
+) -> CheckExecution:
     """Get single execution record."""
-    exec_record = _executions.get(execution_id)
+    exec_record = exec_repo.get_execution(execution_id)
     if not exec_record:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

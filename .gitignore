@@ -10,6 +10,7 @@ env/
 venv/
 *.egg-info/
 .pytest_cache/
+.pytest-tmp*/
 
 # Node & Frontend
 node_modules/

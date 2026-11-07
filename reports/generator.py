@@ -2,6 +2,7 @@ import html
 from datetime import datetime, timezone
 from typing import List, Optional
 from app.schemas.assessment import Assessment
+from app.schemas.check_execution import CheckExecution
 from app.schemas.engagement import Engagement
 from app.schemas.evidence import Evidence
 from app.schemas.finding import Finding
@@ -22,8 +23,18 @@ class SecurityReportGenerator:
         scope_items: List[ScopeItem],
         findings: List[Finding],
         evidence_list: List[Evidence],
+        executions: Optional[List[CheckExecution]] = None,
     ) -> str:
-        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        now = datetime.now(timezone.utc)
+        now_str = now.strftime("%Y-%m-%d %H:%M:%S UTC")
+
+        def is_expired(scope_item: ScopeItem) -> bool:
+            if not scope_item.expiresAt:
+                return False
+            expires_at = scope_item.expiresAt
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            return expires_at <= now
 
         critical_count = sum(1 for f in findings if f.severity == "critical")
         high_count = sum(1 for f in findings if f.severity == "high")
@@ -55,17 +66,50 @@ class SecurityReportGenerator:
         md.append("## 3. Authorized Scope Boundary")
         md.append("| Rule ID | Type | Target Pattern | Policy | Environment |")
         md.append("|---|---|---|---|---|")
+        expired_count = 0
         for s in scope_items:
-            policy = "**IN SCOPE (Allow)**" if s.inScope else "**EXCLUDED (Strict Block)**"
+            if is_expired(s):
+                policy = "**EXPIRED (Not Authorized)**"
+                expired_count += 1
+            elif s.inScope:
+                policy = "**IN SCOPE (Allow)**"
+            else:
+                policy = "**EXCLUDED (Strict Block)**"
             md.append(f"| `{s.id}` | {s.type} | `{s.value}` | {policy} | {s.environment or 'unknown'} |")
+        if expired_count:
+            md.append("")
+            md.append(
+                f"*{expired_count} scope rule(s) are expired and are not active authorization. "
+                "Expired rules cannot authorize a target.*"
+            )
         md.append("")
 
         md.append("## 4. Methodology & Scope Guard Verification")
         md.append(
-            "All assessments were executed through the AllTools-CyberSec defensive workbench. "
-            "Every target query passed strict `Scope Guard` pre-flight validation enforcing fail-closed "
-            "default-deny behavior. Out-of-scope targets were strictly blocked before transmission."
+            "All target checks were evaluated by the backend `Scope Guard` before execution. "
+            "Network targets outside the authorized scope were blocked before transmission. "
+            "Local-only analysis rules do not transmit data to a target."
         )
+        if executions:
+            md.append("")
+            md.append("### Recorded Check Executions")
+            md.append("| Execution ID | Rule ID | Target | Decision | Status | Duration |")
+            md.append("|---|---|---|---|---|---|")
+            local_analysis_allow = False
+            local_analysis_rules = {"SEC-AUTH-001", "SEC-CRYPTO-001"}
+            for ex in executions:
+                dur = f"{ex.durationMs}ms" if ex.durationMs is not None else "—"
+                decision_val = ex.scopeDecision.value if hasattr(ex.scopeDecision, "value") else str(ex.scopeDecision)
+                status_val = ex.status.value if hasattr(ex.status, "value") else str(ex.status)
+                if ex.ruleId in local_analysis_rules and decision_val == "ALLOW":
+                    local_analysis_allow = True
+                md.append(f"| `{ex.id}` | `{ex.ruleId}` | `{ex.target}` | {decision_val} | `{status_val}` | {dur} |")
+            if local_analysis_allow:
+                md.append("")
+                md.append(
+                    "*`ALLOW` for local-analysis rules (`SEC-AUTH-001`, `SEC-CRYPTO-001`) authorizes "
+                    "local input analysis only. No network transmission occurs for these checks.*"
+                )
         md.append("")
 
         md.append("## 5. Summary of Findings")
@@ -122,8 +166,16 @@ class SecurityReportGenerator:
         scope_items: List[ScopeItem],
         findings: List[Finding],
         evidence_list: List[Evidence],
+        executions: Optional[List[CheckExecution]] = None,
     ) -> str:
-        md_content = cls.generate_markdown(engagement, assessment, scope_items, findings, evidence_list)
+        md_content = cls.generate_markdown(
+            engagement=engagement,
+            assessment=assessment,
+            scope_items=scope_items,
+            findings=findings,
+            evidence_list=evidence_list,
+            executions=executions,
+        )
         safe_title = html.escape(engagement.name, quote=True)
         safe_md_content = html.escape(md_content, quote=True)
 

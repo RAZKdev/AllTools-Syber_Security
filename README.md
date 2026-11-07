@@ -32,6 +32,7 @@ AllTools-CyberSec dibuat untuk:
 4. **Generator Laporan** — ekspor Markdown dan HTML siap cetak, berisi observasi, dampak, rekomendasi, dan tabel hash bukti.
 5. **Workbench UI** — dashboard metrik, halaman **Target Scope**, **Check Executions**, **Issue Activity**, dan **Reports & Audit**. Mode demo (`?demo=true`) memakai fixture offline dan menonaktifkan eksekusi target live.
 6. **Kontrak Domain** — JSON Schema di `core/contracts/schemas/` mendokumentasikan bentuk model domain. Validasi runtime API dilakukan oleh model Pydantic; JSON Schema tidak dipakai sebagai validator runtime.
+7. **Persistence & Recovery** — repositori SQLite, migrasi skema saat startup, instance lock per direktori data, rekonsiliasi eksekusi terputus, backup/restore, dan quarantine.
 
 **Catatan cakupan rule:** 9 dari 11 rule memakai `collect_from_dict` dengan fixture contoh ketika `simulatedData` tidak dikirim; hanya `SEC-CRYPTO-001` dan `SEC-AUTH-001` yang menganalisis input pengguna langsung. Endpoint eksekusi tidak menjalankan collector jaringan live, sehingga hasil default adalah demonstrasi rule, bukan pemindaian target nyata.
 
@@ -92,6 +93,18 @@ python -m uvicorn app.main:app --app-dir backend --reload --port 8000
 
 Swagger UI tersedia di `http://localhost:8000/docs`.
 
+### Lokasi Data Persisten
+
+Secara default backend menyimpan data di `%LOCALAPPDATA%\AllTools-CyberSec` (Windows) atau `${XDG_DATA_HOME:-~/.local/share}/AllTools-CyberSec` (POSIX).
+
+Untuk memakai direktori lain, set variabel berikut sebelum backend dijalankan:
+
+```powershell
+$env:ALLTOOLS_DATA_DIR="D:\data\alltools"
+```
+
+Isi direktori data: `workbench.db`, `evidence/`, `quarantine/`, `backups/`, dan `workbench.lock`. Satu direktori data hanya boleh dipakai oleh satu proses backend (instance lock).
+
 ### Frontend
 
 ```bash
@@ -103,6 +116,13 @@ npm run dev
 Aplikasi tersedia di `http://localhost:5173`.
 
 Repo ini **tidak** menyertakan `start.bat`; gunakan perintah manual di atas.
+
+### Build Frontend
+
+```bash
+cd frontend
+npm run build
+```
 
 ## 7. Pengujian
 
@@ -120,7 +140,30 @@ Repo ini **tidak** menyertakan `start.bat`; gunakan perintah manual di atas.
 
 `pytest.ini` sudah menetapkan `pythonpath = . backend` dan `testpaths = backend/tests tests`, jadi perintah dijalankan dari root repo. Pengujian mencakup Scope Guard, API, serta rule dan analyzer dengan fixture. Tidak ada test yang memindai target jaringan live.
 
-## 8. Batas Keamanan & Etika
+Status verifikasi terakhir (7 November 2026): **283 backend test passed**, dengan 1 `StarletteDeprecationWarning` dari `httpx`/`starlette.testclient`. Frontend diverifikasi melalui `npm run build`; belum ada automated test frontend.
+
+## 8. Status Proyek & Batasan yang Diketahui
+
+**Status verifikasi terakhir (7 November 2026):**
+
+- **283 backend test passed** (1 deprecation warning dari Starlette TestClient).
+- Frontend TypeScript + Vite build lulus.
+- Data operasional tersimpan di SQLite dan bertahan setelah restart backend.
+- Hardening keamanan dari review PR: fingerprint eksekusi terikat pada operasi (`pre-flight` vs `run`), record pre-flight memakai namespace `PRE-`, deteksi direktori data produksi lintas platform, verifikasi authorization Ed25519 dengan public key yang di-pin, serta validasi containment pada restore backup, archive path, dan recovery quarantine.
+
+**Batasan saat ini:**
+
+- Belum ada UI untuk membuat engagement/assessment; saat ini melalui API.
+- Demo Mode bersifat statis: eksekusi check dan perubahan scope dinonaktifkan.
+- Belum ada endpoint audit log; halaman Reports & Audit memakai execution trail.
+- `/executions/pre-flight` tetap membuat execution record audit-only dengan ID `PRE-...`; check tidak dieksekusi oleh endpoint ini.
+- Tabel pada layar mobile masih dapat scroll horizontal.
+- Belum ada automated test frontend; verifikasi frontend memakai TypeScript build + browser QA.
+- Ditujukan untuk penggunaan lokal single-user: CORS terbuka dan belum ada autentikasi.
+- `SEC-AUTH-001` dan `SEC-CRYPTO-001` adalah analisis offline; label `ALLOW` di UI bukan otorisasi untuk aktivitas jaringan.
+- Proxy Vite default mengarah ke port `8000`.
+
+## 9. Batas Keamanan & Etika
 
 Proyek ini hanya untuk pengujian defensif yang sah, audit konfigurasi, dan laboratorium riset lokal. Jangan gunakan untuk malware, pencurian kredensial, eksploitasi destruktif, persistensi tanpa izin, atau aktivitas ofensif ilegal. Pastikan Anda memiliki izin tertulis sebelum memindai sistem apa pun.
 
