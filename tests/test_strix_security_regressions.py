@@ -8,6 +8,7 @@ Covers:
    Ed25519 public key is configured.
 """
 
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -85,6 +86,50 @@ def test_production_detection_honors_posix_xdg_default(
     assert get_default_data_dir(platform="posix") == expected_production_dir
     assert is_production_data_dir(expected_production_dir / "evidence", platform="posix") is True
     assert is_production_data_dir(tmp_path / "isolated_sandbox", platform="posix") is False
+
+
+def _platform_default_data_dir(local_app_data: Path, xdg_data_home: Path) -> Path:
+    """Return the current platform's default data directory for these env values."""
+    if os.name == "nt":
+        return (local_app_data / "AllTools-CyberSec").resolve()
+    return (xdg_data_home / "AllTools-CyberSec").resolve()
+
+
+def test_platform_default_directory_remains_protected_when_override_is_set(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """An ALLTOOLS_DATA_DIR override must not stop guarding the platform default directory."""
+    local_app_data = tmp_path / "local_app_data"
+    xdg_data_home = tmp_path / "xdg_data_home"
+    override_dir = tmp_path / "override_data"
+    monkeypatch.setenv("LOCALAPPDATA", str(local_app_data))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_data_home))
+    monkeypatch.setenv("ALLTOOLS_DATA_DIR", str(override_dir))
+
+    default_production = _platform_default_data_dir(local_app_data, xdg_data_home)
+
+    assert is_production_data_dir(default_production) is True
+    assert is_production_data_dir(default_production / "evidence") is True
+    assert is_production_data_dir(override_dir) is True
+    assert is_production_data_dir(tmp_path / "isolated_sandbox") is False
+
+
+def test_migration_engine_blocks_platform_default_when_override_is_set(
+    tmp_path: Path, maintenance_session, monkeypatch: pytest.MonkeyPatch
+):
+    """The engine must still reject the platform default directory under an override."""
+    local_app_data = tmp_path / "local_app_data"
+    xdg_data_home = tmp_path / "xdg_data_home"
+    override_dir = tmp_path / "override_data"
+    override_dir.mkdir()
+    default_dir = _platform_default_data_dir(local_app_data, xdg_data_home)
+    default_dir.mkdir(parents=True)
+    monkeypatch.setenv("LOCALAPPDATA", str(local_app_data))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_data_home))
+    monkeypatch.setenv("ALLTOOLS_DATA_DIR", str(override_dir))
+
+    with pytest.raises(MigrationSafetyError, match="production data directory"):
+        MigrationEngine(data_dir=default_dir, maintenance_session=maintenance_session)
 
 
 def test_authorization_gate_requires_pinned_public_key(tmp_path: Path):

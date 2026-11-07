@@ -119,15 +119,35 @@ def get_canonical_data_dir(
     return get_default_data_dir(platform=platform)
 
 
+def get_production_data_dirs(
+    env_override: Optional[str] = None,
+    platform: Optional[str] = None,
+) -> set[Path]:
+    """
+    Return every directory that must be treated as production storage.
+
+    Both the platform default and the configured override are protected so an
+    override cannot silently un-guard data left in the default location.
+    """
+    production_dirs = {get_default_data_dir(platform=platform)}
+    custom_dir = env_override if env_override is not None else os.environ.get("ALLTOOLS_DATA_DIR")
+    if custom_dir:
+        production_dirs.add(Path(custom_dir).expanduser().resolve())
+    return production_dirs
+
+
 def is_production_data_dir(
     target: Path,
     env_override: Optional[str] = None,
     platform: Optional[str] = None,
 ) -> bool:
-    """Return True if target is the canonical data directory or one of its descendants."""
+    """Return True if target is a production data directory or one of its descendants."""
     resolved_target = Path(target).expanduser().resolve()
-    production_dir = get_canonical_data_dir(env_override=env_override, platform=platform)
-    return resolved_target == production_dir or production_dir in resolved_target.parents
+    production_dirs = get_production_data_dirs(env_override=env_override, platform=platform)
+    return any(
+        resolved_target == production_dir or production_dir in resolved_target.parents
+        for production_dir in production_dirs
+    )
 
 
 def get_storage_paths(custom_data_dir: Optional[Path] = None) -> StoragePaths:
