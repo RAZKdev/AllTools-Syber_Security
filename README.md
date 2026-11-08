@@ -124,6 +124,16 @@ cd frontend
 npm run build
 ```
 
+### Test Frontend
+
+```bash
+cd frontend
+npm test          # sekali jalan
+npm run test:watch
+```
+
+Test frontend memakai Vitest + React Testing Library dengan jsdom. Cakupannya adalah API client serta komponen `SeverityBadge`, `StatusBadge`, `DataTable`, dan `ConfirmDialog`; backend tidak perlu berjalan.
+
 ## 7. Pengujian
 
 **Windows (PowerShell):**
@@ -140,14 +150,14 @@ npm run build
 
 `pytest.ini` sudah menetapkan `pythonpath = . backend` dan `testpaths = backend/tests tests`, jadi perintah dijalankan dari root repo. Pengujian mencakup Scope Guard, API, serta rule dan analyzer dengan fixture. Tidak ada test yang memindai target jaringan live.
 
-Status verifikasi terakhir (7 November 2026): **285 backend test passed**, dengan 1 `StarletteDeprecationWarning` dari `httpx`/`starlette.testclient`. Frontend diverifikasi melalui `npm run build` dan smoke test dev server Vite 8; belum ada automated test frontend.
+Status verifikasi terakhir (7 November 2026): **285 backend test passed**, dengan 1 `StarletteDeprecationWarning` dari `httpx`/`starlette.testclient`, dan **38 frontend test passed** (Vitest + React Testing Library). Frontend juga diverifikasi melalui `npm run build` dan smoke test dev server Vite 8.
 
 ## 8. Status Proyek & Batasan yang Diketahui
 
 **Status verifikasi terakhir (7 November 2026):**
 
 - **285 backend test passed** (1 deprecation warning dari Starlette TestClient).
-- Frontend TypeScript + Vite 8 build lulus; `npm audit` melaporkan 0 vulnerability.
+- **38 frontend test passed** untuk API client dan komponen kunci; `npm run build` dan `npm audit` (0 vulnerability) juga lulus.
 - Data operasional tersimpan di SQLite dan bertahan setelah restart backend.
 - Hardening keamanan dari review PR: fingerprint eksekusi terikat pada operasi (`pre-flight` vs `run`), record pre-flight memakai namespace `PRE-`, deteksi direktori data produksi lintas platform (termasuk direktori default saat override aktif), verifikasi authorization Ed25519 dengan public key yang di-pin, serta validasi containment pada restore backup, archive path, dan recovery quarantine.
 
@@ -158,7 +168,7 @@ Status verifikasi terakhir (7 November 2026): **285 backend test passed**, denga
 - Belum ada endpoint audit log; halaman Reports & Audit memakai execution trail.
 - `/executions/pre-flight` tetap membuat execution record audit-only dengan ID `PRE-...`; check tidak dieksekusi oleh endpoint ini.
 - Tabel pada layar mobile masih dapat scroll horizontal.
-- Belum ada automated test frontend; verifikasi frontend memakai TypeScript build + browser QA.
+- Automated test frontend masih terbatas pada unit/component test (API client dan komponen kunci); belum ada E2E browser, coverage threshold, atau CI test pipeline.
 - Ditujukan untuk penggunaan lokal single-user: CORS terbuka dan belum ada autentikasi.
 - `SEC-AUTH-001` dan `SEC-CRYPTO-001` adalah analisis offline; label `ALLOW` di UI bukan otorisasi untuk aktivitas jaringan.
 - Proxy Vite default mengarah ke port `8000`.
